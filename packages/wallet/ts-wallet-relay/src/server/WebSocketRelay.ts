@@ -89,7 +89,7 @@ export interface WebSocketRelayOptions {
    * Use when routing multiple WS services on one HTTP server.
    */
   noServer?: boolean
-  /** How often to ping every socket. Default 30 000 ms. */
+  /** How often to ping every socket, in ms. Integer >= 1, default 30 000. */
   heartbeatIntervalMs?: number
   /**
    * Consecutive missed pongs tolerated before a socket is terminated. Default 2, so a
@@ -142,8 +142,8 @@ export class WebSocketRelay {
     }
     this.maxMissedHeartbeats = maxMissed
     const interval = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
-    if (!(interval > 0)) {
-      throw new RangeError(`heartbeatIntervalMs must be a positive number, got ${interval}`)
+    if (!Number.isInteger(interval) || interval < 1) {
+      throw new RangeError(`heartbeatIntervalMs must be an integer >= 1, got ${interval}`)
     }
     this.server = server
     this.path = options?.path ?? '/ws'

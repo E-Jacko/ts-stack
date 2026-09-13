@@ -150,7 +150,17 @@ describe('WebSocketRelay heartbeat', () => {
     const s = http.createServer()
     expect(() => new WebSocketRelay(s, { maxMissedHeartbeats: 0 })).toThrow(RangeError)
     expect(() => new WebSocketRelay(s, { maxMissedHeartbeats: 1.5 })).toThrow(RangeError)
+  })
+
+  // A non-finite interval is not inert: Node coerces both NaN and Infinity to a 1 ms
+  // delay, which would ping every socket a thousand times a second.
+  it('rejects an invalid heartbeat interval', () => {
+    const s = http.createServer()
     expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: 0 })).toThrow(RangeError)
+    expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: -1 })).toThrow(RangeError)
+    expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: NaN })).toThrow(RangeError)
+    expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: Infinity })).toThrow(RangeError)
+    expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: 1.5 })).toThrow(RangeError)
   })
 })
 

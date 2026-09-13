@@ -92,7 +92,7 @@ export interface WalletRelayServiceOptions {
    * dropped phone can be diagnosed from server logs.
    */
   onSocketClosed?: (info: SocketCloseInfo) => void
-  /** Heartbeat ping interval in ms. Forwarded to WebSocketRelay. Default 30 000. */
+  /** Heartbeat ping interval in ms. Integer >= 1. Forwarded to WebSocketRelay. Default 30 000. */
   heartbeatIntervalMs?: number
   /**
    * Consecutive missed pongs tolerated before a socket is terminated. Forwarded to
