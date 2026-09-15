@@ -41,7 +41,6 @@ import {
   expectedLockingKey,
   identityKeyFromDidKey,
   readUoraAnchor,
-  UORA_ANCHOR_FIELD_COUNT,
   UORA_ANCHOR_PREFIX,
   UORA_ANCHOR_PROTOCOL
 } from '../uoradpp/anchorFormat.js'
@@ -530,27 +529,12 @@ describe('the boundary between the subject and the type', () => {
   })
 })
 
-describe('the shapes a lenient reader admitted, and this one refuses', () => {
+describe('UORA v3 key and drop-tail validation', () => {
   const F = ANCHOR_V3_FIXTURE
   const manager = new UoraDppTopicManager()
 
-  /*
-   * Both were found by verifying the published format text against the readers
-   * that implement it, not by an incident: nothing on chain uses either shape.
-   * `PushDrop.decode` accepts a 65-byte uncompressed key push, and the decoded
-   * key re-compresses before the attribution comparison, so admitting it was
-   * invisible; and it stops reading at the first drop opcode, so a short tail,
-   * the wrong mix of drops or a trailing chunk all parsed. The format's
-   * reference reader refuses both, and admission rules are version-sensitive
-   * across index deployments: a lenient instance would disagree with its peers
-   * about topic membership. The two fixture vectors below are what hold every
-   * copy of this reader to the same answer.
-   */
   it('refuses the 65-byte uncompressed locking push', async () => {
     const script = LockingScript.fromHex(F.uncompressedKey)
-    // The generic decoder reads it, and attribution would still hold: that is
-    // the loophole, and why the refusal has to happen at the push.
-    expect(PushDrop.decode(script).lockingPublicKey.toString()).toBe(F.lockingKey)
     expect(() => readUoraAnchor(script)).toThrow(/locking key push is not 33 bytes/)
     const admitted = await manager.identifyAdmissibleOutputs(txWith(script).toBEEF(), [])
     expect(admitted.outputsToAdmit).toEqual([])
@@ -560,8 +544,6 @@ describe('the shapes a lenient reader admitted, and this one refuses', () => {
     expect(F.malformedTail).toHaveLength(3)
     for (const hex of F.malformedTail) {
       const script = LockingScript.fromHex(hex)
-      // Eight fields to the generic decoder, which never looks past the first drop.
-      expect(PushDrop.decode(script).fields).toHaveLength(UORA_ANCHOR_FIELD_COUNT + 1)
       expect(() => readUoraAnchor(script)).toThrow(/drop tail/)
       const admitted = await manager.identifyAdmissibleOutputs(txWith(script).toBEEF(), [])
       expect(admitted.outputsToAdmit).toEqual([])
@@ -610,6 +592,25 @@ describe('what readUoraAnchor refuses', () => {
       false
     )
   }
+
+  it('preserves printable Unicode and exact field length boundaries', async () => {
+    const unicode = claim({ subject: '产品/café/🌱', uoraType: 'Origine é' })
+    const bounded = claim({
+      attestationId: 'i'.repeat(256),
+      subject: 's'.repeat(512),
+      uoraType: 't'.repeat(64)
+    })
+    for (const expected of [unicode, bounded]) {
+      const script = await anchorScript(expected)
+      const { anchor, fields } = readUoraAnchor(script)
+      expect(anchor).toMatchObject(expected)
+      await expect(
+        assertAnchorSignature(fields, anchor.anchoredBy, anchor.attestationId)
+      ).resolves.toBeUndefined()
+      const result = await manager.identifyAdmissibleOutputs(txWith(script).toBEEF(), [])
+      expect(result.outputsToAdmit).toEqual([0])
+    }
+  })
 
   it('refuses an output that is not this many fields', async () => {
     // Two fields and no signature. The count is checked before anything is

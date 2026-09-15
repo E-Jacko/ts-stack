@@ -4,7 +4,7 @@ title: '@bsv/overlay-topics'
 kind: package
 domain: overlays
 npm: '@bsv/overlay-topics'
-version: '1.7.1'
+version: '1.7.2'
 last_updated: '2026-08-27'
 last_verified: '2026-08-27'
 review_cadence_days: 30
@@ -207,3 +207,18 @@ const admittance = await manager.identifyAdmissibleOutputs(beef, [])
 - [API reference (TypeDoc)](https://bsv-blockchain.github.io/ts-stack/api/overlay-topics/)
 - [Source on GitHub](https://github.com/bsv-blockchain/ts-stack/tree/main/packages/overlays/topics)
 - [npm](https://www.npmjs.com/package/@bsv/overlay-topics)
+
+## UORA v3 reader compatibility
+
+Version 1.7.2 aligns `readUoraAnchor` and `tm_uora_dpp` with the UORA v3 format:
+a 33-byte compressed locking key, eight fields, exactly four `OP_2DROP`
+instructions, and printable UTF-8 text without C0/C1 controls or DEL. Valid
+anchors keep the same bytes, signing preimage, topic identifier and admission
+result. Unicode text remains supported; no new normalization is applied.
+
+Coordinate reader upgrades across nodes serving `tm_uora_dpp`. Audit any
+previously indexed nonconforming outputs before rebuilding that topic, because
+older readers may have admitted inputs that the format does not permit.
+Repository fixtures establish format compatibility; they do not establish an
+inventory of every deployed or historical anchor. Other topics, lookup query
+shapes and persisted schemas are unchanged.

@@ -38,7 +38,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
-- `tm_uora_dpp` reads the anchor output exactly, as the format's reference reader does, instead of through the generic `PushDrop` decoder. A 65-byte uncompressed locking key push, a drop tail that is short, spelled with the wrong opcodes or followed by a trailing chunk, and a field carrying a control character are now refused; the decoder admitted all three, the first invisibly because the decoded key re-compresses before the attribution check. No published anchor uses any of these shapes. Admission rules are version-sensitive across index deployments, so a lenient instance would disagree with its peers about topic membership. The shared fixture gains the `uncompressedKey` and `malformedTail` vectors that pin the first two refusals.
+- Version 1.7.2 aligns `tm_uora_dpp` with the versioned UORA v3 format: compressed locking keys, exact drop tails, and printable UTF-8 fields. Valid anchors retain their bytes and admission result. The shared reference fixture covers key and tail validation. Coordinate reader upgrades and audit previously indexed nonconforming outputs before rebuilding the topic; this change does not claim a complete inventory of historical anchors.
 
 ### Security
 
