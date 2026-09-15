@@ -311,7 +311,7 @@
     "@bsv/authsocket": "2.1.7",
     "@bsv/authsocket-client": "2.1.6",
     "@bsv/message-box-client": "2.5.0",
-    "@bsv/paymail": "2.4.7",
+    "@bsv/paymail": "2.4.8",
     "@bsv/402-pay": "0.3.1",
     "@bsv/auth": "0.1.4",
     "@bsv/auth-express-middleware": "2.2.3",
