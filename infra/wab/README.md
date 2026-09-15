@@ -37,6 +37,8 @@ Additionally, the WAB provides a **faucet** feature that can make a one-time BSV
 7. **CI/CD** – Example GitHub Actions workflow to build, push, and deploy to **Google Cloud Run** with **Cloud SQL**.
 8. **UMP support pinning** – An authenticated operator can select one UMP outpoint as a legacy-ambiguity fallback.
 9. **Verified phone changes** – Authenticated wallets can verify the same or a new number, rotate their presentation key, and retain reversible ownership history.
+10. **Optional presentation-key vault** – A staged, rolling-upgrade-compatible mode can AES-256-GCM encrypt presentation keys at rest and index them with a keyed lookup digest without changing the client API.
+11. **Recoverable registration** – New identities remain pending until the wallet confirms its UMP token was published, so interrupted account creation can resume safely.
 
 ---
 
@@ -168,6 +170,11 @@ DB_PORT=3306
 # Other environment-specific config
 PORT=3000
 
+# Optional presentation-key defense in depth. Omit both for legacy mode.
+# Read "Staged presentation-key encryption" before changing an existing server.
+WAB_PRESENTATION_KEY_ENCRYPTION_MODE=dual-write
+WAB_PRESENTATION_KEY_ENCRYPTION_KEY=<64 hex characters from a secret manager>
+
 # Optional, explicit reverse-proxy hop count. Omit when directly reachable.
 TRUST_PROXY_HOPS=1
 
@@ -187,6 +194,35 @@ TRUST_PROXY_HOPS=1
 ```
 
 _(Note: The server already reads environment variables to figure out how to connect to the DB, Twilio, etc. Adjust as needed.)_
+
+### Staged presentation-key encryption
+
+WAB must be able to return a presentation key after successful authentication;
+the server and its runtime encryption key therefore remain inside the trusted
+boundary. This feature is defense in depth against a database-only disclosure,
+not protection from a fully compromised WAB process. The HTTP API and key values
+returned to legacy clients do not change in any mode.
+
+The schema migration only adds nullable sidecar columns. It never rewrites an
+existing row, does not require an encryption key, and can be applied while the
+old WAB version is still serving traffic. Roll out the feature in three stages:
+
+1. Deploy the additive schema/new binary in `legacy` mode (the default when no
+   vault key is configured). Existing plaintext reads and writes continue.
+2. Generate a separate 32-byte random key, keep it in the deployment secret
+   manager, and use `dual-write`. Startup idempotently backfills keyed lookup
+   digests and AES-256-GCM ciphertext while retaining plaintext for old
+   replicas. When the mode variable is omitted, configuring a valid key also
+   selects `dual-write`.
+3. After every old replica is drained and a dual-write startup has completed,
+   explicitly switch every replica to `encrypted`. Startup reconciles any final
+   legacy writes and redacts the plaintext columns before accepting traffic.
+
+Do not start an old binary after stage 3. Returning from `encrypted` to a prior
+binary requires first restoring plaintext with a controlled rollback using the
+same vault key. Back up the vault key separately from the database; losing it
+after redaction makes those account credentials unrecoverable. A malformed key
+always fails startup, and `dual-write`/`encrypted` refuse to start without one.
 
 All state-changing routes are rate-limited and return HTTP 429 with
 `ERR_RATE_LIMITED`. Defaults are 10 authentication attempts per 15 minutes,
@@ -244,6 +280,14 @@ clients still run normal verified UMP lookup and lineage selection first. They
 use the pin only if the result remains ambiguous and the pin names one of the
 verified candidates.
 
+New registrations use a two-phase lifecycle. OTP completion atomically creates
+and links the WAB identity with `registrationStatus: "pending"`. The wallet
+publishes its UMP token and then calls `/auth/registration/finalize`; retries
+reuse the same WAB presentation key. If publication succeeded but the finalize
+response was interrupted, the next verified login finds the token and
+finalizes idempotently. Existing rows migrate as `active`, so a missing UMP
+token never makes an established account silently replaceable.
+
 Phone changes use four calls: `/auth/phone-change/start`,
 `/auth/phone-change/complete`, `/auth/phone-change/commit`, and
 `/auth/phone-change/finalize`. The first two prove possession of the requested
@@ -265,6 +309,9 @@ only an absent/empty value intentionally disables the routes.
 
 - `POST /admin/ump-pin` sets or clears a pin after identifying a user by
   presentation key or authentication method payload.
+- `POST /admin/registration/reopen` performs a verified UMP lookup, then marks a
+  support-verified, pre-migration stranded registration pending only when the
+  lookup is cleanly empty, without deleting its identity or faucet history.
 - `POST /admin/phone-change/restore` restores the associations recorded for a
   `changeId`; it refuses automatic restoration after another ownership change.
 
@@ -302,6 +349,71 @@ for evidence requirements, commands, auditing, rollout, and rollback.
 ---
 
 ## Auth Methods
+
+### Admin-managed demonstration accounts
+
+WAB 1.6 adds opt-in `DemoPhone` accounts for app-store reviewers and other
+shared demonstrations. They use a separate identity namespace: an identical
+phone-shaped alias under `TwilioPhone` continues to require real SMS verification
+and resolves to a different wallet. Demo codes never authenticate an ordinary
+SMS identity or authorize a phone-number transfer.
+
+Set a dedicated, secret-manager-provided `WAB_DEMO_AUTH_SECRET` of at least 32 random
+characters, and the existing `WAB_ADMIN_TOKEN`, to provision demo access through
+`POST /admin/demo-accounts`. The JSON `action` is one of:
+
+- `provision`: supply `phoneNumber` (an E.164-shaped demo alias), `label`, and
+  `expiresAtEpochMs` within the next 30 days, or explicit JSON `null` for
+  non-expiring store-review access (WAB 1.7+). Omitted expiry and numeric zero
+  are rejected. Returns a random six-digit `code`
+  once, plus the account `id`. The alias is not proof of telephone ownership.
+- `rotate`: supply `id` and `expiresAtEpochMs`; returns a new code once and
+  restores the account's five-attempt budget. The demo identity remains the same.
+- `revoke`: supply `id`; disables subsequent demo authentication immediately.
+- `list`: returns metadata for the latest 100 demo accounts, never codes or hashes.
+
+All management actions require the existing administrator bearer credential and
+rate limits. Provision/rotation responses are `Cache-Control: no-store`. Codes
+are stored only as keyed digests, bound to the account's random identifier. An
+account locks after five incorrect codes in total until an administrator rotates
+it; this budget is database-backed across replicas and does not reset on sign-in,
+restart, or a new authentication start. Expired/revoked accounts fail closed.
+Removing the demo key disables the method; rotating that key invalidates all
+existing demo codes until each account's code is rotated.
+
+Use an expiry for temporary demonstrations. Stores that require permanently
+reusable reviewer credentials can use explicit `null`; all admin authentication,
+guess-budget, secret-rotation and revocation controls still apply. Keep a named
+operator responsible for revoking this access when it is no longer needed.
+Changing between expiring and non-expiring modes requires an admin code rotation.
+The non-expiring mode persists zero in the existing expiry column; an older WAB
+binary treats it as expired, so rollback fails closed without a schema change.
+
+Clients can select `DemoPhone` explicitly, or configure the WAB base URL as
+`https://your-wab.example/demo`. The latter advertises only `DemoPhone` so existing
+clients that select the first advertised method work without a new binary.
+Use the alias on the phone screen, the administrator-provided code on the OTP
+screen, and a separate wallet password. No SMS is sent for this method.
+For compatibility with older mobile phone interactors, requests to the explicit
+`/demo` base URL translate the wire method `TwilioPhone` to `DemoPhone` before
+authentication. They never resolve a real SMS identity. Ordinary root routes do
+not perform this translation. Phone-number change is not supported on the demo
+base URL; normal authentication, recovery shares and account deletion are.
+
+Ordinary WAB discovery keeps `TwilioPhone` first. The `/demo` routes share normal
+authentication, user-operation, and faucet rate limits.
+
+Initialize the dedicated demo wallet and verify a second clean sign-in before
+sharing its credentials with reviewers. Never reuse a personal or customer
+wallet; shared demo wallets should contain only disposable demonstration data
+and a deliberately limited sample balance. Revocation stops WAB sign-in, but
+cannot erase wallet keys or snapshots already shared with a reviewer. Keep a
+record of the operator, purpose, account id, expiry, and revocation. Do not log
+codes, wallet passwords, presentation keys, or administrative credentials.
+
+The migration adds only `demo_accounts`; existing identities require no
+migration. Retain the table when rolling back to an older image, which ignores
+it. Disable demo access and update reviewer instructions before rollback.
 
 The WAB is **modular**: you can configure multiple ways for users to authenticate. Two example methods are:
 
@@ -412,6 +524,9 @@ TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxx
 TWILIO_VERIFY_SERVICE_SID=VExxxxxxxxx
 PORT=8080
+# Optional; begin with dual-write during a rolling upgrade.
+WAB_PRESENTATION_KEY_ENCRYPTION_MODE=dual-write
+WAB_PRESENTATION_KEY_ENCRYPTION_KEY=<64 hex characters from a secret manager>
 ```
 
 You configure these either in **GitHub Secrets** or in the Cloud Run deploy command (`--set-env-vars`).

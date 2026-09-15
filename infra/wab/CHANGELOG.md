@@ -10,8 +10,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- WAB 1.7.0 accepts explicit `expiresAtEpochMs: null` for store-mandated
+  non-expiring demo credentials. Omitted expiry remains invalid; revocation,
+  admin rotation, namespace isolation and persistent guess limits still apply.
+  No schema migration is required, and older binaries reject these credentials.
+- WAB 1.6.0 adds opt-in, admin-provisioned demonstration identities with expiring,
+  rotatable credentials, persisted attempt limits and immediate login revocation.
+  The explicit `/demo` base URL supports existing mobile phone interactors while
+  keeping demo identities separate from real SMS accounts. See the README for
+  provisioning, client setup, deployment and additive-migration rollback guidance.
+- Refresh compatible standalone `qs` and development-only `browserslist`
+  resolutions to their patched versions; no new dependency or override is added.
+
 ### Security
 
+- WAB 1.8.0 adds an optional, staged defense-in-depth vault for presentation-key bearer
+  credentials and phone-change history. The additive schema, legacy fallback,
+  dual-write backfill, and unchanged HTTP API support rolling upgrades from
+  existing WAB servers; operators explicitly enable final plaintext redaction.
+- Make account creation a two-phase WAB/UMP transition: new identities are
+  atomically linked as pending, wallet publication is finalized idempotently,
+  and only an explicit pending state may resume when no UMP token exists.
+- Add an authenticated, rate-limited support repair that reopens a confirmed
+  pre-migration stranded registration without deleting phone or faucet state.
+- Backfill every existing WAB account as active so an absent or unavailable UMP
+  result cannot implicitly reset an established identity.
 - Add bearer-authenticated, rate-limited operator routes to pin a WAB account
   to a verified UMP outpoint and restore a disputed phone-association transfer.
 - Require current-account knowledge plus Twilio OTP possession before a phone

@@ -13,6 +13,14 @@ Use this package in:
 
 For Node servers, use [`@bsv/wallet-toolbox`](https://www.npmjs.com/package/@bsv/wallet-toolbox). For browsers, use [`@bsv/wallet-toolbox-client`](https://www.npmjs.com/package/@bsv/wallet-toolbox-client).
 
+## Large wallet records
+
+Compatible providers negotiate authenticated, integrity-checked transfers for
+records that exceed a single HTTP message. Uploads resume saved pieces after
+interruption; ordinary pages and legacy providers retain their existing protocol.
+Version 1 is bounded to 64 MiB per frame and requires an upgraded provider.
+See the [transfer and migration guide](../docs/sync-transfer.md).
+
 ## Install
 
 Install the `@bsv/sdk` peer dependency alongside this package:
@@ -32,6 +40,27 @@ The package publishes:
 
 The packed package is validated with Metro and compiled to optimized Hermes bytecode. Node.js 22 or newer is required for the published tooling and contributor workflow, not as an on-device runtime.
 
+### Password derivation without WebAssembly
+
+Argon2id password derivation uses `hash-wasm` when WebAssembly is available.
+React Native engines such as Hermes that do not expose WebAssembly use an
+asynchronously yielding JavaScript fallback with identical parameters and
+output. Existing UMP v3 wallets remain compatible, and users do not need to
+change a device setting or migrate their account.
+
+### Optional native Argon2id backend
+
+Import `registerArgon2idBackend`, `unregisterArgon2idBackend`, and the
+`AsyncArgon2idBackend` type from this package's root export. Register a host
+implementation only after verifying its interoperability; `isReady()` must
+remain false until that verification succeeds. A ready backend is authoritative:
+derivation errors and malformed output are surfaced without switching implementations.
+
+Concurrent cold derivations share one background `preload()` attempt and keep
+the portable path. Later calls can retry after that attempt settles. Hosts must
+make `preload()` and `isReady()` reentrant and cache permanent failures or apply
+backoff. Unregister the same backend object when the host no longer owns it.
+
 ## Remote storage example
 
 ```ts
@@ -41,7 +70,7 @@ import { KeyDeriver, PrivateKey } from '@bsv/sdk'
 const chain = 'main'
 const keyDeriver = new KeyDeriver(new PrivateKey(privateKeyHex, 'hex'))
 
-// Remote storage over HTTP is the default mobile-safe backend.
+// Remote storage over HTTPS is the default mobile-safe backend.
 const storageManager = new WalletStorageManager(keyDeriver.identityKey)
 await storageManager.addWalletStorageProvider(new StorageClient(keyDeriver, 'https://storage.example.com'))
 await storageManager.makeAvailable()
@@ -85,6 +114,21 @@ Spin up a minimal wallet that watches for inbound payments via a remote storage 
 | Node-only filesystem and `os` helpers | Not available on mobile                                       |
 
 The mobile entry includes `Wallet`, `WalletSigner`, `WalletStorageManager`, the mobile `StorageClient`, `Services`, `Monitor`, `WalletPermissionsManager`, `WalletSettingsManager`, `ArcSSEClient`, and related mobile-safe APIs. It does not export `StorageIdb`, `StorageKnex`, `SetupClient`, or test-only chain implementations.
+
+## Wallet snapshot security
+
+Wallet-manager snapshots contain root key material and intentionally include
+the decryption key needed by their self-contained format, so access to the
+snapshot is access to the wallet. Store the complete snapshot in the iOS Keychain, Android
+Keystore-backed encrypted storage, or a comparably trusted secret store. Do not
+use ordinary AsyncStorage, logs, analytics, crash reports, clipboard data, or
+unprotected device/cloud backups. Treat any snapshot that leaves trusted
+storage as a wallet-credential compromise and rotate the affected wallet.
+
+`StorageClient` and credential-bearing Arcade SSE clients require HTTPS for
+remote endpoints. Plain HTTP is accepted only for explicit loopback hosts
+during development. SSE dependency debug logging is disabled so callback
+tokens and authorization headers do not reach device logs.
 
 See the [`@bsv/wallet-toolbox`](https://www.npmjs.com/package/@bsv/wallet-toolbox) README for full documentation.
 

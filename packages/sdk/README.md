@@ -16,6 +16,21 @@ emits a portable `number[]` settlement artifact so HTTP, WebSocket, Message Box,
 and JSON transports preserve identical transaction bytes. The same boundary
 protects overlay lookup queries and JSON BEEF responses.
 
+AuthFetch stops pending certificate dispatch and session recovery after its
+request deadline. An already dispatched request may still complete on the
+server; callers must resolve its outcome before retrying a non-idempotent write.
+
+For signature payloads of at least 64 KiB, `ProtoWallet` uses asynchronous
+platform SHA-256 when Web Crypto is available, avoiding long synchronous
+hashing on browser UI threads. Unsupported or failed native hashing falls back
+to the existing implementation using the same input snapshot. Short payloads,
+explicit digests, signature bytes, and verification rules remain compatible.
+No host registration or API migration is required. The additional portable
+path measures 742,126 raw bytes in the SDK Vite fixture and 555,548 raw bytes
+in UMD; their reviewed ceilings are 742,500 and 556,000 bytes respectively.
+The combined sync and security candidate measures 560,560 raw bytes with esbuild;
+its reviewed raw ceiling is 561,000 bytes. Compression ceilings are unchanged.
+
 ## Table of Contents
 
 1. [Objective](#objective)
@@ -97,9 +112,26 @@ For a more detailed tutorial and advanced examples, check our [Documentation](#d
   rejected peer responses reject and clean up the owning request; they do not
   become unhandled process errors or leave listeners behind.
 
+  For BRC-105 payments, a recipient may include the optional
+  `x-bsv-payment-known-txids` response header on its 402 challenge. The value is
+  a comma-separated list of 64-character hexadecimal transaction IDs the
+  recipient already possesses and has validated. `AuthFetch` passes at most
+  256 unique lowercase IDs to the wallet's `createAction` options, including
+  when payment requirements change and a new transaction is created. This
+  lets compatible wallets omit known ancestors from payment BEEF. Whitespace,
+  duplicates, and malformed entries are ignored; an absent or invalid-only
+  header preserves existing payment behavior. Browser services must expose
+  the optional response header through their existing CORS policy.
+  The header is an optional SDK extension, not a standardized BRC-105 header.
+
 - **Identity**: Comprehensive identity management system supporting identity verification and certificate management.
 
 - **Key Value Store**: Distributed key-value store for decentralized data storage and retrieval.
+
+Identity publication rejects a certificate unless its certifier signature
+verifies affirmatively. `GlobalKVStore` likewise treats overlay responses as
+untrusted and returns only entries with a valid controller signature; a
+verification error or `valid: false` result is rejected.
 
 - **Distributed Storage**: Scalable and secure distributed data storage solutions to support blockchain applications.
 
