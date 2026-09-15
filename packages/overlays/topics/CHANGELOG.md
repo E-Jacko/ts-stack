@@ -38,7 +38,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
-- (Document bugs that were fixed since the last release.)
+- Version 1.7.2 aligns `tm_uora_dpp` with the versioned UORA v3 format: compressed locking keys, exact drop tails, and printable UTF-8 fields. Valid anchors retain their bytes and admission result. The shared reference fixture covers key and tail validation. Coordinate reader upgrades and audit previously indexed nonconforming outputs before rebuilding the topic; this change does not claim a complete inventory of historical anchors.
 
 ### Security
 
