@@ -3,8 +3,8 @@ id: about-doc-agent
 title: 'Documentation Maintenance'
 kind: meta
 version: '2.1.0'
-last_updated: '2026-09-14'
-last_verified: '2026-09-14'
+last_updated: '2026-09-15'
+last_verified: '2026-09-15'
 review_cadence_days: 30
 status: stable
 tags: [about, documentation, maintenance, automation]
@@ -51,8 +51,8 @@ id: unique-slug
 title: 'Page title'
 kind: spec
 version: '1.0.0'
-last_updated: '2026-07-27'
-last_verified: '2026-07-27'
+last_updated: '2026-09-15'
+last_verified: '2026-09-15'
 review_cadence_days: 30
 status: stable
 tags: [protocol, reference]
@@ -78,7 +78,7 @@ tags: [protocol, reference]
 pnpm docs:facts
 
 # Verify generated facts, parity metadata, package README contracts,
-# package-doc versions, and review cadence for affected pages
+# package-doc versions, and advisory review reminders for affected pages
 pnpm docs:facts:check
 
 # Validate frontmatter and source links
@@ -119,9 +119,10 @@ revision expressions outside that syntax.
 Release, scheduled, and manual GitHub runs have no change scope unless one is
 provided explicitly. All invocations still enforce package documentation,
 generated-content consistency through `docs:facts:check`, and date consistency
-(verification cannot predate an update or be in the future). Only review expiry
-is scoped. The full audit is an opt-in maintenance command, not an unrelated
-PR's merge requirement. Re-verify an affected expired page against its source
+(verification cannot predate an update or be in the future). Only review-expiry reminders
+are scoped; they are warnings in ordinary source checks. The full audit is an opt-in maintenance command, not an unrelated
+PR's merge requirement. The weekly Maintenance review deadlines workflow
+runs this audit independently and fails on overdue reviews. Re-verify an affected expired page against its source
 before updating its date; do not bulk-advance unrelated verification dates.
 
 The package README contract covers every public package and requires registry

@@ -3,8 +3,8 @@ id: repository-health
 title: 'Repository Health Controls'
 kind: reference
 version: '1.4.1'
-last_updated: '2026-09-14'
-last_verified: '2026-09-14'
+last_updated: '2026-09-15'
+last_verified: '2026-09-15'
 review_cadence_days: 30
 status: stable
 tags: [reference, governance, quality, security, releases]
@@ -56,8 +56,10 @@ package READMEs that do not identify, install, demonstrate, and license the
 registry artifact, and missing, duplicated, version-drifted, or
 pre-consolidation public package pages.
 
-Documentation review expiry applies only to edited pages and pages associated
-with directly changed sources. Package and service inventories supply their
+Documentation review reminders apply only to edited pages and pages associated
+with directly changed sources. Elapsed dates are warnings, including on affected
+pages, so an ordinary code change is never blocked just because time passed.
+The separate weekly Maintenance review deadlines workflow enforces all dates. Package and service inventories supply their
 page relationships; `freshness.sourcePaths` in the documentation policy maps
 other pages to source files or directories. The check uses the PR merge-base
 diff, the push before/after diff, or local changes against `origin/main`.
@@ -224,7 +226,8 @@ checks:
 3. generated artifact boundaries have valid owners, sources, generators, narrow
    review/analysis policies, and exact CodeQL exclusion coverage;
 4. published package versions match the recorded baseline;
-5. exception records are owned, structurally valid, and unexpired;
+5. exception records are owned and structurally valid; elapsed review dates
+   are maintenance warnings in source CI and errors with `--maintenance`;
 6. current package-contract findings exactly match the ratcheted snapshot; and
 7. generated stack/conformance facts, all 33 public package README contracts,
    and one current consolidated package page per public package are current;

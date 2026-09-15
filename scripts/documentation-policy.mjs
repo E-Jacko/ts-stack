@@ -5,7 +5,7 @@ import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   documentationChangedFiles,
-  documentationDateFindings,
+  documentationDateReport,
   documentationIsAffected,
   documentationSources
 } from './documentation-freshness.mjs'
@@ -44,6 +44,7 @@ const changedFiles = documentationChangedFiles(ROOT, process.argv.slice(2))
 const publicPackages = inventory.projects.filter(project => project.release === 'npm-oidc')
 const projectsByName = new Map(inventory.projects.map(project => [project.name, project]))
 const failures = []
+const warnings = []
 const documentedProjects = new Set()
 let packageDocCount = 0
 let freshnessDocCount = 0
@@ -153,10 +154,19 @@ for (const docPath of await walkMarkdown(join(ROOT, 'docs'))) {
   )
   const affected = documentationIsAffected(relativePath, sources, changedFiles)
   if (affected) affectedDocCount += 1
-  for (const finding of documentationDateFindings(updated, verified, cadence, today, affected)) {
-    failures.push(`${relativePath}: ${finding}`)
-  }
+  const report = documentationDateReport(
+    updated,
+    verified,
+    cadence,
+    today,
+    affected,
+    changedFiles === null
+  )
+  failures.push(...report.errors.map(finding => `${relativePath}: ${finding}`))
+  warnings.push(...report.warnings.map(finding => `${relativePath}: ${finding}`))
 }
+
+for (const warning of warnings) console.warn(`MAINTENANCE ${warning}`)
 
 if (failures.length > 0) {
   console.error(`Documentation policy failed (${failures.length} finding(s)):`)

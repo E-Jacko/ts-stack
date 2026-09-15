@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import {
   documentationChangedFiles,
   documentationDateFindings,
+  documentationDateReport,
   documentationIsAffected,
   documentationSources
 } from './documentation-freshness.mjs'
@@ -261,4 +262,29 @@ test('repository policy passes without inheriting elapsed deadlines from an empt
   )
   assert.equal(result.status, 0, result.stderr || result.stdout)
   assert.match(result.stdout, /0 affected pages checked for review expiry/)
+})
+
+test('an edited source produces a review reminder, not an unrelated merge failure', () => {
+  const args = ['2026-08-12', '2026-08-12', 30, new Date('2026-09-15T00:00:00Z'), true]
+  assert.deepEqual(documentationDateReport(...args, false), {
+    errors: [],
+    warnings: ['verification expired 2026-09-11']
+  })
+  assert.deepEqual(documentationDateReport(...args, true), {
+    errors: ['verification expired 2026-09-11'],
+    warnings: []
+  })
+  assert.deepEqual(documentationDateReport('2026-09-14', '2026-08-12', 30, args[3], false, false), {
+    errors: ['last_verified predates last_updated'],
+    warnings: []
+  })
+})
+
+test('maintenance deadlines run outside the merge workflow', () => {
+  const workflow = readFileSync(new URL('.github/workflows/maintenance-review.yml', root), 'utf8')
+  assert.match(workflow, /schedule:/)
+  assert.match(workflow, /repository-health.mjs --maintenance/)
+  assert.match(workflow, /documentation-policy.mjs --all/)
+  assert.ok(!workflow.includes('pull_request:'))
+  assert.ok(!workflow.includes('continue-on-error:'))
 })
