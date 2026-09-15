@@ -161,6 +161,7 @@ describe('WebSocketRelay heartbeat', () => {
     expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: NaN })).toThrow(RangeError)
     expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: Infinity })).toThrow(RangeError)
     expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: 1.5 })).toThrow(RangeError)
+    expect(() => new WebSocketRelay(s, { heartbeatIntervalMs: 2_147_483_648 })).toThrow(RangeError)
   })
 })
 
@@ -218,6 +219,36 @@ describe('WebSocketRelay close reporting', () => {
     expect(disconnects).toHaveLength(1)
     expect(disconnects[0].info).toBe(closes[0])
   })
+
+  it.each(['throw', 'reject'])(
+    'contains a diagnostic callback that will %s and preserves reconnects',
+    async failure => {
+      const reported: SocketCloseInfo[] = []
+      relay.onSocketClose(info => {
+        reported.push(info)
+        if (failure === 'throw') throw new Error('diagnostic unavailable')
+        return Promise.reject(new Error('diagnostic unavailable'))
+      })
+      const ws = connect('mobile')
+      await opened(ws)
+      const done = closed(ws)
+      ws.close(1000)
+      await done
+      await sleep(SETTLE_MS)
+      expect(reported).toHaveLength(1)
+      expect(disconnects).toHaveLength(1)
+      expect(disconnects[0].info).toBe(reported[0])
+
+      const replacement = connect('mobile')
+      await opened(replacement)
+      const replacementClosed = closed(replacement)
+      replacement.close(1000)
+      await replacementClosed
+      await sleep(SETTLE_MS)
+      expect(reported).toHaveLength(2)
+      expect(disconnects).toHaveLength(2)
+    }
+  )
 
   it('reports a server-initiated close from disconnectMobile', async () => {
     const ws = connect('mobile')

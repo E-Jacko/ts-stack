@@ -89,10 +89,11 @@ export interface WalletRelayServiceOptions {
    * Called for every accepted WebSocket that closes, both roles, with the close code,
    * the cause (client, heartbeat or server) and how long it was open. Fires before the
    * session bookkeeping that drives `onSessionDisconnected`. Intended for logging so a
-   * dropped phone can be diagnosed from server logs.
+   * dropped phone can be diagnosed from server logs. Thrown errors and rejected promises
+   * are contained so logging cannot prevent session cleanup.
    */
   onSocketClosed?: (info: SocketCloseInfo) => void
-  /** Heartbeat ping interval in ms. Integer >= 1. Forwarded to WebSocketRelay. Default 30 000. */
+  /** Heartbeat ping interval in ms. Integer 1–2 147 483 647. Forwarded to WebSocketRelay. Default 30 000. */
   heartbeatIntervalMs?: number
   /**
    * Consecutive missed pongs tolerated before a socket is terminated. Forwarded to

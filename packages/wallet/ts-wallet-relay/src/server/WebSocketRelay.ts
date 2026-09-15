@@ -6,6 +6,7 @@ import { stringifyBRC100 } from '@bsv/sdk'
 import { compileOriginMatcher, type AllowedOrigins } from '../shared/originMatcher.js'
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
+const MAX_HEARTBEAT_INTERVAL_MS = 2_147_483_647
 // A phone on a mobile network misses single pongs routinely. Terminating on the
 // first miss ended live sessions 30 to 60 s after the last pong; two consecutive
 // misses is the smallest tolerance that survives one dropped frame.
@@ -89,7 +90,7 @@ export interface WebSocketRelayOptions {
    * Use when routing multiple WS services on one HTTP server.
    */
   noServer?: boolean
-  /** How often to ping every socket, in ms. Integer >= 1, default 30 000. */
+  /** How often to ping every socket, in ms. Integer 1–2 147 483 647, default 30 000. */
   heartbeatIntervalMs?: number
   /**
    * Consecutive missed pongs tolerated before a socket is terminated. Default 2, so a
@@ -142,8 +143,10 @@ export class WebSocketRelay {
     }
     this.maxMissedHeartbeats = maxMissed
     const interval = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
-    if (!Number.isInteger(interval) || interval < 1) {
-      throw new RangeError(`heartbeatIntervalMs must be an integer >= 1, got ${interval}`)
+    if (!Number.isInteger(interval) || interval < 1 || interval > MAX_HEARTBEAT_INTERVAL_MS) {
+      throw new RangeError(
+        `heartbeatIntervalMs must be an integer between 1 and ${MAX_HEARTBEAT_INTERVAL_MS}, got ${interval}`
+      )
     }
     this.server = server
     this.path = options?.path ?? '/ws'
@@ -204,6 +207,7 @@ export class WebSocketRelay {
    * Register a callback invoked for every accepted socket that closes, whether or not
    * it still held its topic slot. Unlike onDisconnect this also fires for a socket that
    * was replaced by a newer connection on the same topic and role. Intended for logging.
+   * Thrown errors and rejected promises are contained; diagnostics cannot prevent cleanup.
    */
   onSocketClose(handler: SocketCloseHandler): void {
     this.onSocketCloseCb = handler
@@ -257,6 +261,16 @@ export class WebSocketRelay {
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────
+
+  private reportSocketClose(info: SocketCloseInfo): void {
+    try {
+      void Promise.resolve(this.onSocketCloseCb?.(info)).catch(() => {
+        // Diagnostic delivery is best effort; asynchronous logging must not disrupt the relay.
+      })
+    } catch {
+      // A logging callback must not prevent topic cleanup or disconnect notification.
+    }
+  }
 
   private handleConnection(ws: WebSocket, req: IncomingMessage): void {
     const url = new URL(req.url ?? '', 'http://localhost')
@@ -357,7 +371,7 @@ export class WebSocketRelay {
         missedPongs: state.missedPongs
       }
       this.socketState.delete(ws)
-      this.onSocketCloseCb?.(info)
+      this.reportSocketClose(info)
       if (entry[role] === ws) {
         entry[role] = null
         this.onDisconnectCb?.(topic, role, info)
