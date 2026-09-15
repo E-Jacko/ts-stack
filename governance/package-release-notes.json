@@ -196,8 +196,8 @@
       "name": "@bsv/wallet-toolbox",
       "publishedVersion": "2.10.0",
       "releaseType": "patch",
-      "summary": "Retains BRC-95 internalization compatibility, preserves typed AtomicBEEF, competing BEEF, and wallet review errors across portable and historical wallet JSON representations, and leaves opaque WAB response JSON unchanged.",
-      "migration": "No consumer migration is required. Canonical AtomicBEEF and existing number-array behavior are unchanged; upgrade to @bsv/sdk 2.4.1 or later for cross-version JSON and wallet-error compatibility."
+      "summary": "ATLAS maintained 2.10.2-atlas.520.1 artifact: exact signed-action recovery through existing sendWith, atomic reservation/lifecycle recovery, and indeterminate handling of ambiguous broadcast responses.",
+      "migration": "No WalletInterface or wire migration. Pin the immutable ATLAS artifact. Consumers must retain the original action on serviceError or recovery refusal and never infer retirement from failed status or abort success."
     },
     {
       "name": "@bsv/wallet-toolbox-client",

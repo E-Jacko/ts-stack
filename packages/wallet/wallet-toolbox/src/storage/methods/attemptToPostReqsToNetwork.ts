@@ -4,6 +4,7 @@ import { EntityProvenTxReq } from '../schema/entities'
 import * as sdk from '../../sdk'
 import { ReqHistoryNote } from '../../sdk'
 import { wait } from '../../utility/utilityHelpers'
+import { isExactResume } from './resumeFailedSendWith'
 import { markConfirmedStaleReqInputs } from './reconcileFailedTransactionInputs'
 
 /**
@@ -25,7 +26,14 @@ export async function attemptToPostReqsToNetwork (
 
   const services = storage.getServices()
 
-  const pbrs = await services.postBeef(r.beef, txids, logger)
+  let pbrs: sdk.PostBeefResult[]
+  try {
+    pbrs = await services.postBeef(r.beef, txids, logger)
+  } catch (error) {
+    if (!vreqs.every(detail => isExactResume(detail.req))) throw error
+    // The network side effect may have happened even when its response was lost.
+    pbrs = []
+  }
 
   // post beef results (pbrs) is an array by service provider
   // for each service provider, there's an aggregate result and individual results by txid.
@@ -103,7 +111,7 @@ async function transferNotesToReqHistories (
     for (const n of notes) {
       vreq.req.addHistoryNote(n)
     }
-    await vreq.req.updateStorageDynamicProperties(storage, trx)
+    if (!isExactResume(vreq.req)) await vreq.req.updateStorageDynamicProperties(storage, trx)
   }
 }
 
@@ -257,6 +265,10 @@ export async function updateReqsFromAggregateResults (
   for (const txid of txids) {
     const ar = apbrs[txid]
     const req = ar.vreq.req
+    if (isExactResume(req)) {
+      await updateExactResume(ar, r, storage, services, trx)
+      continue
+    }
     await req.refreshFromStorage(storage, trx)
 
     const { successCount, doubleSpendCount, statusErrorCount, serviceErrorCount } = ar
@@ -326,6 +338,54 @@ export async function updateReqsFromAggregateResults (
     logger?.log(`updated ${txid}`)
   }
   logger?.group('update storage from aggregate results')
+}
+
+/** Failure-shaped transport responses never retire a signed exact retry. */
+async function updateExactResume(
+  ar: AggregatePostBeefTxResult,
+  result: PostReqsToNetworkResult,
+  storage: StorageProvider,
+  services?: sdk.WalletServices,
+  outerTrx?: sdk.TrxToken
+): Promise<void> {
+  let accepted = ar.status === 'success'
+  if (!accepted && services != null) {
+    try {
+      const status = await services.getStatusForTxids([ar.txid])
+      const matches = status.results.filter(item => item.txid === ar.txid)
+      accepted = status.status === 'success' && matches.length === 1 &&
+        (matches[0].status === 'known' || matches[0].status === 'mined')
+    } catch { /* inconclusive status retains the same queued request */ }
+  }
+  const req = ar.vreq.req
+  await storage.transaction(async trx => {
+    await storage.updateProvenTxReq(req.id, { updated_at: new Date() }, trx)
+    await req.refreshFromStorage(storage, trx)
+    if (['completed', 'unmined', 'unconfirmed', 'callback'].includes(req.status)) {
+      accepted = true
+      return
+    }
+    if (!['unsent', 'sending', 'unprocessed'].includes(req.status)) {
+      // Another lifecycle operation may already have released input reservations.
+      // Only a new validated requeue can reconstruct them, even if post succeeded.
+      accepted = false
+      return
+    }
+    req.status = accepted ? 'unmined' : 'sending'
+    req.wasBroadcast = req.wasBroadcast || accepted
+    req.attempts++
+    req.addHistoryNote({ what: 'exactSendWithResult', when: new Date().toISOString(), accepted })
+    await req.updateStorageDynamicProperties(storage, trx)
+    for (const id of req.notify.transactionIds ?? []) {
+      const transactions = await storage.findTransactions({ partial: { transactionId: id, txid: ar.txid }, trx })
+      if (transactions.length !== 1) throw new sdk.WERR_INVALID_OPERATION('Exact retry lost its transaction lineage.')
+      if (transactions[0].status !== 'completed')
+        await storage.updateTransaction(id, { status: accepted ? 'unproven' : 'sending' }, trx)
+    }
+  }, outerTrx)
+  const detail = result.details.find(item => item.txid === ar.txid)!
+  detail.status = accepted ? 'success' : 'serviceError'
+  detail.competingTxs = undefined
 }
 
 async function gatherCompetingTxids (

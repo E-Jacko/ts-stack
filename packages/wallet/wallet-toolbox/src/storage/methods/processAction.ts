@@ -7,6 +7,7 @@ import {
   WalletLoggerInterface,
   TelemetrySpan
 } from '@bsv/sdk'
+import { isExactResume, resumeFailedSendWith } from './resumeFailedSendWith'
 import { aggregateActionResults } from '../../utility/aggregateResults'
 import { StorageProvider } from '../StorageProvider'
 import {
@@ -103,6 +104,8 @@ async function processActionCore(
       logger?.log(`sending txid ${req.txid}`)
     }
   }
+
+  await resumeFailedSendWith(storage, userId, args.sendWith)
 
   const { swr, ndr } = await traceProcessStep(
     storage,
@@ -274,7 +277,6 @@ export async function shareReqsWithWorld(
   classifyReqDetails(r.details, swr, readyToSendReqs)
 
   const readyToSendReqIds = readyToSendReqs.map(r => r.id)
-  const transactionIds = readyToSendReqs.flatMap(r => r.notify.transactionIds || [])
 
   const batch = txids.length > 1 ? randomBytesBase64(16) : undefined
   if (isDelayed) {
@@ -282,8 +284,23 @@ export async function shareReqsWithWorld(
     // transaction here because the current aggregate BEEF is only a scheduling artifact.
     if (readyToSendReqIds.length > 0) {
       await storage.transaction(async trx => {
-        await storage.updateProvenTxReq(readyToSendReqIds, { status: 'unsent', batch }, trx)
-        await storage.updateTransaction(transactionIds, { status: 'sending' }, trx)
+        const ordinary = readyToSendReqs.filter(req => !isExactResume(req))
+        if (ordinary.length > 0) {
+          await storage.updateProvenTxReq(ordinary.map(req => req.id), { status: 'unsent', batch }, trx)
+          await storage.updateTransaction(ordinary.flatMap(req => req.notify.transactionIds ?? []), { status: 'sending' }, trx)
+        }
+        for (const req of readyToSendReqs.filter(isExactResume)) {
+          await storage.updateProvenTxReq(req.id, { updated_at: new Date() }, trx)
+          await req.refreshFromStorage(storage, trx)
+          if (['unmined', 'completed', 'callback', 'unconfirmed'].includes(req.status)) {
+            swr.find(result => result.txid === req.txid)!.status = 'unproven'
+            continue
+          }
+          if (!['unsent', 'sending'].includes(req.status))
+            throw new WERR_INVALID_OPERATION('Exact retry state changed during delayed scheduling.')
+          await storage.updateProvenTxReq(req.id, { status: 'unsent', batch }, trx)
+          await storage.updateTransaction(req.notify.transactionIds ?? [], { status: 'sending' }, trx)
+        }
       })
     }
     return { swr, ndr }

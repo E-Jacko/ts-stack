@@ -6,6 +6,12 @@
 
 A [BRC-100](https://github.com/bitcoin-sv/BRCs/blob/master/wallet/0100.md) conforming wallet implementation for the BSV blockchain, built on the [BSV SDK](https://bsv-blockchain.github.io/ts-stack/packages/sdk/). Provides persistent storage, protocol-based key derivation, transaction monitoring, chain tracking, and signing — everything needed to build wallet-powered applications on BSV.
 
+## ATLAS maintained lifecycle repair
+
+The `2.10.2-atlas.520.1` artifact adds safe exact signed-action retry through
+existing `sendWith`; see [compatibility and limitations](docs/atlas-exact-resume.md).
+It does not authorize creating replacement actions after uncertain broadcasts.
+
 ## Overview
 
 The Wallet Toolbox is the reference implementation of the BRC-100 wallet interface. It connects the BSV SDK's cryptographic primitives to real storage backends, network services, and signing flows so that application developers don't have to wire these layers together themselves.
