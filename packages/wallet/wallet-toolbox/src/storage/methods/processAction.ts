@@ -7,7 +7,7 @@ import {
   WalletLoggerInterface,
   TelemetrySpan
 } from '@bsv/sdk'
-import { isExactResume, resumeFailedSendWith } from './resumeFailedSendWith'
+import { isExactResume, lockExactResumeBinding, resumeFailedSendWith } from './resumeFailedSendWith'
 import { aggregateActionResults } from '../../utility/aggregateResults'
 import { StorageProvider } from '../StorageProvider'
 import {
@@ -111,14 +111,8 @@ async function processActionCore(
     storage,
     'wallet.storage.process_action.share',
     parent,
-    async () => await shareReqsWithWorld(
-      storage,
-      userId,
-      txidsOfReqsToShareWithWorld,
-      args.isDelayed,
-      undefined,
-      logger
-    )
+    async () =>
+      await shareReqsWithWorld(storage, userId, txidsOfReqsToShareWithWorld, args.isDelayed, undefined, logger)
   )
 
   r.sendWithResults = swr
@@ -136,11 +130,7 @@ async function traceProcessStep<T>(
   callback: () => Promise<T>
 ): Promise<T> {
   if (parent == null) return await callback()
-  return await storage.telemetry.withSpan(
-    name,
-    { component: 'wallet-storage', parent: parent.context },
-    callback
-  )
+  return await storage.telemetry.withSpan(name, { component: 'wallet-storage', parent: parent.context }, callback)
 }
 
 export interface GetReqsAndBeefDetail {
@@ -286,12 +276,19 @@ export async function shareReqsWithWorld(
       await storage.transaction(async trx => {
         const ordinary = readyToSendReqs.filter(req => !isExactResume(req))
         if (ordinary.length > 0) {
-          await storage.updateProvenTxReq(ordinary.map(req => req.id), { status: 'unsent', batch }, trx)
-          await storage.updateTransaction(ordinary.flatMap(req => req.notify.transactionIds ?? []), { status: 'sending' }, trx)
+          await storage.updateProvenTxReq(
+            ordinary.map(req => req.id),
+            { status: 'unsent', batch },
+            trx
+          )
+          await storage.updateTransaction(
+            ordinary.flatMap(req => req.notify.transactionIds ?? []),
+            { status: 'sending' },
+            trx
+          )
         }
         for (const req of readyToSendReqs.filter(isExactResume)) {
-          await storage.updateProvenTxReq(req.id, { updated_at: new Date() }, trx)
-          await req.refreshFromStorage(storage, trx)
+          const action = await lockExactResumeBinding(storage, req, trx, userId)
           if (['unmined', 'completed', 'callback', 'unconfirmed'].includes(req.status)) {
             swr.find(result => result.txid === req.txid)!.status = 'unproven'
             continue
@@ -299,7 +296,7 @@ export async function shareReqsWithWorld(
           if (!['unsent', 'sending'].includes(req.status))
             throw new WERR_INVALID_OPERATION('Exact retry state changed during delayed scheduling.')
           await storage.updateProvenTxReq(req.id, { status: 'unsent', batch }, trx)
-          await storage.updateTransaction(req.notify.transactionIds ?? [], { status: 'sending' }, trx)
+          await storage.updateTransaction(action.transactionId, { status: 'sending' }, trx)
         }
       })
     }
@@ -307,6 +304,11 @@ export async function shareReqsWithWorld(
   }
 
   if (readyToSendReqIds.length < 1) return { swr, ndr }
+
+  for (const req of readyToSendReqs.filter(isExactResume))
+    await storage.transaction(async trx => {
+      await lockExactResumeBinding(storage, req, trx, userId)
+    })
 
   await verifyMergedBeef(storage, r, readyToSendReqs, logger)
 

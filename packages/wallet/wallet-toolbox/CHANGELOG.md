@@ -8,7 +8,9 @@ attention to changes that materially alter behavior or extend functionality.
 
 - Extend existing `createAction` `sendWith` to recover a validated failed signed
   action by requeueing exactly its stored bytes and restoring reservations
-  atomically. Reconcile exact-tx known responses and retain ambiguous broadcasts
+  atomically, resolving known ancestry from wallet storage and rechecking complete
+  output lineage and the original user/action binding after asynchronous work.
+  Reconcile exact-tx known responses and retain ambiguous broadcasts
   as pending. No replacement action or new public wallet API is introduced.
 - Distribution is an immutable ATLAS tarball, not an upstream npm release.
   See [exact-retry compatibility and limitations](docs/atlas-exact-resume.md).

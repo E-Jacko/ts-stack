@@ -4,7 +4,7 @@ import { EntityProvenTxReq } from '../schema/entities'
 import * as sdk from '../../sdk'
 import { ReqHistoryNote } from '../../sdk'
 import { wait } from '../../utility/utilityHelpers'
-import { isExactResume } from './resumeFailedSendWith'
+import { isExactResume, lockExactResumeBinding } from './resumeFailedSendWith'
 import { markConfirmedStaleReqInputs } from './reconcileFailedTransactionInputs'
 
 /**
@@ -13,13 +13,18 @@ import { markConfirmedStaleReqInputs } from './reconcileFailedTransactionInputs'
  *
  * @param reqs
  */
-export async function attemptToPostReqsToNetwork (
+export async function attemptToPostReqsToNetwork(
   storage: StorageProvider,
   reqs: EntityProvenTxReq[],
   trx?: sdk.TrxToken,
   logger?: WalletLoggerInterface
 ): Promise<PostReqsToNetworkResult> {
   // initialize results, validate reqs ready to post, txids are of the transactions in the beef that we care about.
+
+  for (const req of reqs.filter(isExactResume))
+    await storage.transaction(async trx => {
+      await lockExactResumeBinding(storage, req, trx)
+    }, trx)
 
   const { r, vreqs, txids } = await validateReqsAndMergeBeefs(storage, reqs, trx)
   logger?.log('validated request and merged beefs')
@@ -47,11 +52,11 @@ export async function attemptToPostReqsToNetwork (
   return r
 }
 
-async function validateReqsAndMergeBeefs (
+async function validateReqsAndMergeBeefs(
   storage: StorageProvider,
   reqs: EntityProvenTxReq[],
   trx?: sdk.TrxToken
-): Promise<{ r: PostReqsToNetworkResult, vreqs: PostReqsToNetworkDetails[], txids: string[] }> {
+): Promise<{ r: PostReqsToNetworkResult; vreqs: PostReqsToNetworkDetails[]; txids: string[] }> {
   const r: PostReqsToNetworkResult = {
     status: 'success',
     beef: new Beef(),
@@ -64,7 +69,7 @@ async function validateReqsAndMergeBeefs (
   for (const req of reqs) {
     try {
       const noRawTx = !req.rawTx
-      const noTxIds = (req.notify.transactionIds == null) || req.notify.transactionIds.length < 1
+      const noTxIds = req.notify.transactionIds == null || req.notify.transactionIds.length < 1
       const noInputBEEF = req.inputBEEF == null
       if (noRawTx || noTxIds || noInputBEEF) {
         // This should have happened earlier...
@@ -92,7 +97,7 @@ async function validateReqsAndMergeBeefs (
   return { r, vreqs, txids: vreqs.map(r => r.txid) }
 }
 
-async function transferNotesToReqHistories (
+async function transferNotesToReqHistories(
   txids: string[],
   vreqs: PostReqsToNetworkDetails[],
   pbrs: sdk.PostBeefResult[],
@@ -115,10 +120,7 @@ async function transferNotesToReqHistories (
   }
 }
 
-function tallyTxidResults (
-  ar: AggregatePostBeefTxResult,
-  pbrs: sdk.PostBeefResult[]
-): void {
+function tallyTxidResults(ar: AggregatePostBeefTxResult, pbrs: sdk.PostBeefResult[]): void {
   for (const pbr of pbrs) {
     const tr = pbr.txidResults.find(tr => tr.txid === ar.txid)
     if (tr == null) continue
@@ -152,7 +154,7 @@ function tallyTxidResults (
  * @param storage
  * @returns
  */
-function aggregatePostBeefResultsByTxid (
+function aggregatePostBeefResultsByTxid(
   txids: string[],
   vreqs: PostReqsToNetworkDetails[],
   pbrs: sdk.PostBeefResult[]
@@ -245,14 +247,12 @@ async function recordStaleInputEvidence(
     aggStatus: ar.status,
     checked: stale.checked,
     confirmed: stale.staleConfirmed,
-    ...(stale.staleOutpoints.length > 0
-      ? { outpoints: stale.staleOutpoints.join(',') }
-      : {})
+    ...(stale.staleOutpoints.length > 0 ? { outpoints: stale.staleOutpoints.join(',') } : {})
   })
   await req.updateStorageDynamicProperties(storage, trx)
 }
 
-export async function updateReqsFromAggregateResults (
+export async function updateReqsFromAggregateResults(
   txids: string[],
   r: PostReqsToNetworkResult,
   apbrs: Record<string, AggregatePostBeefTxResult>,
@@ -286,9 +286,12 @@ export async function updateReqsFromAggregateResults (
 
     if (['completed', 'unmined'].includes(req.status))
     // However it happened, don't degrade status if it is somehow already beyond broadcast stage
-    { continue }
+    {
+      continue
+    }
 
-    if (ar.status === 'doubleSpend' && (services != null) && (trx == null)) await confirmDoubleSpend(ar, r.beef, storage, services, logger)
+    if (ar.status === 'doubleSpend' && services != null && trx == null)
+      await confirmDoubleSpend(ar, r.beef, storage, services, logger)
 
     const { newReqStatus, newTxStatus } = applyAggregateStatus(req, ar.status)
 
@@ -328,8 +331,7 @@ export async function updateReqsFromAggregateResults (
     //
     // Gate: services available + not in a nested transaction (chain
     // queries are async I/O — same gate as confirmDoubleSpend).
-    if (newTxStatus === 'failed')
-      await recordStaleInputEvidence(ar, req, storage, services, trx, logger)
+    if (newTxStatus === 'failed') await recordStaleInputEvidence(ar, req, storage, services, trx, logger)
 
     // Transfer critical results to details going back to the user
     const details = r.details.find(d => d.txid === txid)!
@@ -353,14 +355,17 @@ async function updateExactResume(
     try {
       const status = await services.getStatusForTxids([ar.txid])
       const matches = status.results.filter(item => item.txid === ar.txid)
-      accepted = status.status === 'success' && matches.length === 1 &&
+      accepted =
+        status.status === 'success' &&
+        matches.length === 1 &&
         (matches[0].status === 'known' || matches[0].status === 'mined')
-    } catch { /* inconclusive status retains the same queued request */ }
+    } catch {
+      /* inconclusive status retains the same queued request */
+    }
   }
   const req = ar.vreq.req
   await storage.transaction(async trx => {
-    await storage.updateProvenTxReq(req.id, { updated_at: new Date() }, trx)
-    await req.refreshFromStorage(storage, trx)
+    const action = await lockExactResumeBinding(storage, req, trx)
     if (['completed', 'unmined', 'unconfirmed', 'callback'].includes(req.status)) {
       accepted = true
       return
@@ -376,19 +381,15 @@ async function updateExactResume(
     req.attempts++
     req.addHistoryNote({ what: 'exactSendWithResult', when: new Date().toISOString(), accepted })
     await req.updateStorageDynamicProperties(storage, trx)
-    for (const id of req.notify.transactionIds ?? []) {
-      const transactions = await storage.findTransactions({ partial: { transactionId: id, txid: ar.txid }, trx })
-      if (transactions.length !== 1) throw new sdk.WERR_INVALID_OPERATION('Exact retry lost its transaction lineage.')
-      if (transactions[0].status !== 'completed')
-        await storage.updateTransaction(id, { status: accepted ? 'unproven' : 'sending' }, trx)
-    }
+    if (action.status !== 'completed')
+      await storage.updateTransaction(action.transactionId, { status: accepted ? 'unproven' : 'sending' }, trx)
   }, outerTrx)
   const detail = result.details.find(item => item.txid === ar.txid)!
   detail.status = accepted ? 'success' : 'serviceError'
   detail.competingTxs = undefined
 }
 
-async function gatherCompetingTxids (
+async function gatherCompetingTxids(
   ar: AggregatePostBeefTxResult,
   beef: Beef,
   services: sdk.WalletServices,
@@ -431,7 +432,7 @@ async function gatherCompetingTxids (
  * @param storage
  * @param services
  */
-async function confirmDoubleSpend (
+async function confirmDoubleSpend(
   ar: AggregatePostBeefTxResult,
   beef: Beef,
   storage: StorageProvider,
@@ -506,7 +507,7 @@ async function confirmDoubleSpend (
  * Returns counts for instrumentation and the set of stale outpoints
  * that were actually evicted (added to history note for diagnostics).
  */
-export async function markStaleInputsAsSpent (
+export async function markStaleInputsAsSpent(
   ar: AggregatePostBeefTxResult,
   storage: StorageProvider,
   services: sdk.WalletServices,
@@ -547,12 +548,7 @@ export interface AggregatePostBeefTxResult {
  *
  */
 export type PostReqsToNetworkDetailsStatus =
-  | 'success'
-  | 'doubleSpend'
-  | 'unknown'
-  | 'invalid'
-  | 'serviceError'
-  | 'invalidTx'
+  'success' | 'doubleSpend' | 'unknown' | 'invalid' | 'serviceError' | 'invalidTx'
 
 export interface PostReqsToNetworkDetails {
   txid: string
