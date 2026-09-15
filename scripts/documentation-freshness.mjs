@@ -110,3 +110,13 @@ export function documentationDateFindings(updated, verified, cadence, today, aff
   if (verifiedDate > today) findings.push('last_verified cannot be in the future')
   return findings
 }
+
+// Calendar reminders do not determine whether a source change is correct.
+// The full maintenance audit enforces deadlines independently of merge CI.
+export function documentationDateReport(updated, verified, cadence, today, affected, fullAudit) {
+  const findings = documentationDateFindings(updated, verified, cadence, today, affected)
+  const warnings = fullAudit
+    ? []
+    : findings.filter(item => item.startsWith('verification expired '))
+  return { errors: findings.filter(item => !warnings.includes(item)), warnings }
+}
