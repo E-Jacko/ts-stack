@@ -3,10 +3,10 @@ id: bsv-sdk
 title: '@bsv/sdk'
 kind: package
 domain: sdk
-version: '2.7.0'
+version: '2.7.1'
 npm: '@bsv/sdk'
-last_updated: '2026-09-10'
-last_verified: '2026-09-10'
+last_updated: '2026-09-16'
+last_verified: '2026-09-16'
 review_cadence_days: 30
 status: stable
 tags: ['sdk', 'crypto', 'transactions']
@@ -23,6 +23,11 @@ Security-sensitive consumers require affirmative cryptographic verdicts.
 `IdentityClient` will not publish a certificate whose certifier signature is
 invalid, and `GlobalKVStore` discards untrusted overlay entries unless their
 controller signature verifies as valid.
+
+Authenticated general messages, certificate requests, and certificate
+responses are bound to the identity in the nonce-selected peer session.
+Transport identity metadata must match that session, and callbacks receive
+only the identity used for signature verification.
 
 ## Install
 
