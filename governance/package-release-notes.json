@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "lastReviewed": "2026-09-08",
+  "lastReviewed": "2026-09-16",
   "owner": "ts-stack-maintainers",
   "entries": [
     {
@@ -33,10 +33,10 @@
     },
     {
       "name": "@bsv/auth-express-middleware",
-      "publishedVersion": "2.2.0",
+      "publishedVersion": "2.2.3",
       "releaseType": "patch",
-      "summary": "Contains late BRC-104 peer-processing failures after the HTTP response or connection has already settled, and preserves BRC-100 byte fields in handshake and buffered JSON responses across number-array, Uint8Array, and historical numeric-key JSON runtimes. Retains the hash-pinned pre-uniformization Open BSV License version 4 grant as a scoped continuity notice. Standardizes first-party author metadata on the current BSV Association name.",
-      "migration": "No API migration is required. Upgrade to @bsv/sdk 2.4.1 or later for the shared byte-boundary contract. Generic signed application-body canonicalization remains unchanged so old and new peers verify identical bytes. Distributors must retain THIRD_PARTY_NOTICES.md and LICENSES/ with the package."
+      "summary": "Requires the SDK release that binds authenticated BRC-104 request identity to the nonce-selected session, preventing an unsigned x-bsv-auth-identity-key header from relabelling a request after valid signature verification.",
+      "migration": "No API or wire migration is required. Upgrade to @bsv/auth-express-middleware 2.2.4 with @bsv/sdk 2.7.1 or later. Valid BRC-103 v0.1 peers keep the same headers, payload bytes, nonces, and signatures; requests whose transport identity differs from the authenticated session now fail closed."
     },
     {
       "name": "@bsv/authsocket",
@@ -166,10 +166,10 @@
     },
     {
       "name": "@bsv/sdk",
-      "publishedVersion": "2.5.0",
-      "releaseType": "minor",
-      "summary": "Uses asynchronous platform SHA-256 for large ProtoWallet signature payloads with an input-snapshot-preserving portable fallback, retaining signature and verification compatibility. Prevents late certificate dispatch and session recovery after an AuthFetch deadline while preserving gateway errors without write replay. Adds one strict BRC-100 byte-boundary contract and secure React Native bridge validation, and completes incorporated-code compliance with hash-pinned provenance, exact MIT/ISC/BSD/Apache notices, source lineage markers, package payloads, a retained UMD banner, SBOM components, and release enforcement. Removes a broken copied Swagger UI scaffold and screenshot; the first-party OpenAPI source remains available for use with any viewer. Standardizes first-party author metadata on the current BSV Association name. Adds an optional SDK extension for recipient-declared known transaction IDs to AuthFetch payment creation and repricing so compatible wallets can omit already-known ancestors from payment BEEF. Rejects GlobalKVStore overlay values when controller-signature verification returns false and refuses to publish identity certificates whose certifier signature is invalid. Records local certificate policies per auth session, enforces dynamic certificate requests without changing the v0.1 wire envelope, documents certificate observers, and requires affirmative wallet acceptance for BRC-29 settlement.",
-      "migration": "No API migration is required. Historical number-array fast paths and React Native behavior remain compatible. Documentation users should load docs/swagger/swagger.yaml into their preferred viewer instead of using the removed static Swagger UI scaffold. Distributors must keep THIRD_PARTY_NOTICES.md and LICENSES/ with source and browser bundles. The optional x-bsv-payment-known-txids response header requires no consumer migration: absent or invalid-only values preserve existing payment creation. Recipients may advertise only transaction IDs they already possess and have validated, as comma-separated 64-character hexadecimal values; AuthFetch forwards at most 256 unique lowercase IDs through createAction options. Browser services must expose the optional response header through their existing CORS policy to enable this optimization. Invalid controller-signed overlay values and invalid identity certificates now fail closed instead of being returned or published; valid data and public method signatures are unchanged. Certificate responses must match a locally requested set; applications relying on unsolicited or unrequested certificates must request their intended set explicitly. Custom session stores must retain certificatePolicy and pendingCertificateRequests and coordinate concurrent writers. Existing sessions fall back to the configured handshake policy. Certificate callbacks remain post-validation observers, not veto hooks. BRC-29 wallets must return accepted: true before settlement is accepted; wire encodings and existing error identities remain unchanged."
+      "publishedVersion": "2.7.0",
+      "releaseType": "patch",
+      "summary": "Binds authenticated general messages, certificate requests, and certificate responses to the identity stored in the nonce-selected session. Mismatched transport identity metadata is rejected, and application callbacks receive only the identity used for signature verification.",
+      "migration": "No API or wire migration is required. Upgrade to @bsv/sdk 2.7.1 or later. Valid BRC-103 v0.1 peers keep the same message fields, payload bytes, nonces, and signature derivation; authenticated messages whose transport identity differs from the established session now fail closed."
     },
     {
       "name": "@bsv/simple",

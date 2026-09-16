@@ -547,6 +547,21 @@ export class Peer {
     throw new Error(message)
   }
 
+  private requireMatchingSessionIdentity (
+    peerSession: PeerSession,
+    claimedIdentityKey: string,
+    messageType: AuthMessage['messageType']
+  ): string {
+    const verifiedIdentityKey = peerSession.peerIdentityKey
+    if (typeof verifiedIdentityKey !== 'string' || verifiedIdentityKey.length === 0) {
+      throw new Error(`Peer identity is not established for ${messageType} message.`)
+    }
+    if (claimedIdentityKey !== verifiedIdentityKey) {
+      throw new Error(`${messageType} identity does not match the authenticated session.`)
+    }
+    return verifiedIdentityKey
+  }
+
   /**
    * Handles incoming messages from the transport.
    *
@@ -822,17 +837,22 @@ export class Peer {
     if (peerSession == null) {
       throw new Error(`Session not found for nonce: ${message.yourNonce as string}`)
     }
+    const verifiedIdentityKey = this.requireMatchingSessionIdentity(
+      peerSession,
+      message.identityKey,
+      message.messageType
+    )
 
     const { valid } = await this.wallet.verifySignature({
       data: Peer.utf8ToBytes(JSON.stringify(message.requestedCertificates)),
       signature: message.signature as number[],
       protocolID: [2, 'auth message signature'],
       keyID: `${message.nonce ?? ''} ${peerSession.sessionNonce ?? ''}`,
-      counterparty: peerSession.peerIdentityKey
+      counterparty: verifiedIdentityKey
     }, this.originator)
     if (!valid) {
       throw new Error(
-        `Invalid signature in certificate request message from ${peerSession.peerIdentityKey as string}`
+        `Invalid signature in certificate request message from ${verifiedIdentityKey}`
       )
     }
 
@@ -848,7 +868,7 @@ export class Peer {
         // Let the application handle it
         for (const callback of this.onCertificateRequestReceivedCallbacks.values()) {
           await callback(
-            message.identityKey,
+            verifiedIdentityKey,
             message.requestedCertificates as RequestedCertificateSet
           )
         }
@@ -857,10 +877,10 @@ export class Peer {
         const verifiableCertificates = await getVerifiableCertificates(
           this.wallet,
           message.requestedCertificates,
-          message.identityKey,
+          verifiedIdentityKey,
           this.originator
         )
-        await this.sendCertificateResponse(message.identityKey, verifiableCertificates)
+        await this.sendCertificateResponse(verifiedIdentityKey, verifiableCertificates)
       }
     }
   }
@@ -925,13 +945,11 @@ export class Peer {
     if (peerSession == null) {
       throw new Error(`Session not found for nonce: ${message.yourNonce as string}`)
     }
-
-    if (
-      typeof peerSession.peerIdentityKey === 'string' &&
-      peerSession.peerIdentityKey !== message.identityKey
-    ) {
-      throw new Error('Certificate response identity does not match the authenticated session.')
-    }
+    const verifiedIdentityKey = this.requireMatchingSessionIdentity(
+      peerSession,
+      message.identityKey,
+      message.messageType
+    )
 
     // Validate message signature
     const { valid } = await this.wallet.verifySignature({
@@ -939,7 +957,7 @@ export class Peer {
       signature: message.signature as number[],
       protocolID: [2, 'auth message signature'],
       keyID: `${message.nonce ?? ''} ${peerSession.sessionNonce ?? ''}`,
-      counterparty: message.identityKey
+      counterparty: verifiedIdentityKey
     }, this.originator)
     if (!valid) {
       throw new Error(
@@ -974,7 +992,7 @@ export class Peer {
 
     // Notify any listeners
     for (const callback of this.onCertificatesReceivedCallbacks.values()) {
-      await callback(message.identityKey, message.certificates ?? [])
+      await callback(verifiedIdentityKey, message.certificates ?? [])
     }
   }
 
@@ -1003,6 +1021,11 @@ export class Peer {
     if (peerSession == null) {
       throw new Error(`Session not found for nonce: ${message.yourNonce as string}`)
     }
+    const verifiedIdentityKey = this.requireMatchingSessionIdentity(
+      peerSession,
+      message.identityKey,
+      message.messageType
+    )
 
     const certificatesRequired = peerSession.certificatesRequired === true
     const certificatesValidated = peerSession.certificatesValidated === true
@@ -1052,12 +1075,12 @@ export class Peer {
       signature: message.signature as number[],
       protocolID: [2, 'auth message signature'],
       keyID: `${message.nonce ?? ''} ${peerSession.sessionNonce ?? ''}`,
-      counterparty: peerSession.peerIdentityKey
+      counterparty: verifiedIdentityKey
     }, this.originator)
 
     if (!valid) {
       throw new Error(
-        `Invalid signature in generalMessage from ${peerSession.peerIdentityKey as string}`
+        `Invalid signature in generalMessage from ${verifiedIdentityKey}`
       )
     }
 
@@ -1065,11 +1088,11 @@ export class Peer {
     await this.touchSession(peerSession.sessionNonce as string)
 
     // Update lastInteractedWithPeer
-    this.lastInteractedWithPeer = message.identityKey
+    this.lastInteractedWithPeer = verifiedIdentityKey
 
     // Dispatch callbacks
     for (const callback of this.onGeneralMessageReceivedCallbacks.values()) {
-      await callback(message.identityKey, message.payload ?? [])
+      await callback(verifiedIdentityKey, message.payload ?? [])
     }
   }
 

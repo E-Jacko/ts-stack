@@ -223,6 +223,46 @@ test('rejects a mismatched session identity before certificate processing', asyn
   expect(validate).not.toHaveBeenCalled()
 })
 
+test('does not dispatch a general message under transport-supplied identity metadata', async () => {
+  const { peer, backing } = await setup()
+  const session = backing.getSession('session')!
+  session.certificatesRequired = false
+  session.certificatesValidated = true
+  backing.updateSession(session)
+  const delivered = jest.fn()
+  peer.listenForGeneralMessages(delivered)
+
+  await expect(
+    (peer as any).processGeneralMessage({
+      ...response([]),
+      messageType: 'general',
+      identityKey: 'unrelated-peer',
+      payload: [1]
+    })
+  ).rejects.toThrow('identity does not match')
+
+  expect(delivered).not.toHaveBeenCalled()
+  expect((peer as any).lastInteractedWithPeer).not.toBe('unrelated-peer')
+})
+
+test('does not dispatch a certificate request under transport-supplied identity metadata', async () => {
+  const { peer, transport } = await setup()
+  const delivered = jest.fn()
+  peer.listenForCertificatesRequested(delivered)
+
+  await expect(
+    (peer as any).processCertificateRequest({
+      ...response([]),
+      messageType: 'certificateRequest',
+      identityKey: 'unrelated-peer',
+      requestedCertificates: policy('certifier', 'type')
+    })
+  ).rejects.toThrow('identity does not match')
+
+  expect(delivered).not.toHaveBeenCalled()
+  expect(transport.send).not.toHaveBeenCalled()
+})
+
 test('uses configured policy for older sessions, and leaves empty responses unvalidated', async () => {
   const { peer, backing } = await setup()
   delete backing.getSession('session')!.certificatePolicy
