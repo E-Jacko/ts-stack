@@ -6,13 +6,15 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 
 | | |
 | --- | --- |
-| [AdmittanceInstructions](#interface-admittanceinstructions) | [OverlayBroadcastFacilitator](#interface-overlaybroadcastfacilitator) |
-| [LookupAnswerProgress](#interface-lookupanswerprogress) | [OverlayLookupFacilitator](#interface-overlaylookupfacilitator) |
-| [LookupFreeformAnswer](#interface-lookupfreeformanswer) | [RankedHost](#interface-rankedhost) |
+| [AdmittanceInstructions](#interface-admittanceinstructions) | [LookupResolverConfig](#interface-lookupresolverconfig) |
+| [LookupAnswerProgress](#interface-lookupanswerprogress) | [LookupResponseReaderOptions](#interface-lookupresponsereaderoptions) |
+| [LookupDiscoveryUpdate](#interface-lookupdiscoveryupdate) | [OverlayBroadcastFacilitator](#interface-overlaybroadcastfacilitator) |
+| [LookupFreeformAnswer](#interface-lookupfreeformanswer) | [OverlayLookupFacilitator](#interface-overlaylookupfacilitator) |
+| [LookupLimits](#interface-lookuplimits) | [RankedHost](#interface-rankedhost) |
 | [LookupQueryOptions](#interface-lookupqueryoptions) | [SHIPBroadcasterConfig](#interface-shipbroadcasterconfig) |
 | [LookupQuestion](#interface-lookupquestion) | [TaggedBEEF](#interface-taggedbeef) |
-| [LookupResolution](#interface-lookupresolution) | [UnreachableHostInfo](#interface-unreachablehostinfo) |
-| [LookupResolverConfig](#interface-lookupresolverconfig) |  |
+| [LookupRequestOptions](#interface-lookuprequestoptions) | [UnreachableHostInfo](#interface-unreachablehostinfo) |
+| [LookupResolution](#interface-lookupresolution) |  |
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
@@ -62,6 +64,17 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 
 ```ts
 export interface LookupAnswerProgress {
+    discoveryComplete?: boolean;
+    terminalReason?: "settled" | "deadline" | "cancelled" | "resource-limit";
+    discoveredHosts?: number;
+    skippedHosts?: number;
+    receivedBytes?: number;
+    retainedBytes?: number;
+    evidenceBytes?: number;
+    trackersTotal?: number;
+    trackersCompleted?: number;
+    trackersFailed?: number;
+    limitsHit?: string[];
     type: "output-list";
     outputs: Array<{
         beef: number[];
@@ -98,12 +111,28 @@ Correlation id used for privacy-safe distributed diagnostics.
 correlationId?: string
 ```
 
+#### Property discoveryComplete
+
+Transport coverage only, never cryptographic validity or global absence.
+
+```ts
+discoveryComplete?: boolean
+```
+
 #### Property emptyHosts
 
 Successful hosts whose output list was empty.
 
 ```ts
 emptyHosts: number
+```
+
+#### Property evidenceBytes
+
+Receipt-copy octets handed to onEvidence, independently bounded.
+
+```ts
+evidenceBytes?: number
 ```
 
 #### Property failedHosts
@@ -146,6 +175,14 @@ Hosts that rejected this query semantically (for example, HTTP 400).
 rejectedHosts: number
 ```
 
+#### Property retainedBytes
+
+Retained decoded BEEF/context octets; JavaScript arrays have additional heap overhead.
+
+```ts
+retainedBytes?: number
+```
+
 #### Property successfulHosts
 
 Hosts that returned a structurally valid output-list response.
@@ -165,6 +202,24 @@ txIds: string[]
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Interface: LookupDiscoveryUpdate
+
+```ts
+export interface LookupDiscoveryUpdate {
+    sources: Map<string, string[]>;
+    trackersTotal: number;
+    trackersCompleted: number;
+    trackersFailed: number;
+    skippedHosts: number;
+    receivedBytes: number;
+    limitsHit: Set<string>;
+    done: boolean;
+}
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Interface: LookupFreeformAnswer
 
 A valid non-aggregatable response returned by a lookup service.
@@ -179,15 +234,40 @@ export interface LookupFreeformAnswer {
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Interface: LookupLimits
+
+Operational client limits, not BEEF validity or service authority rules.
+
+```ts
+export interface LookupLimits {
+    maxHosts: number;
+    maxHostsPerTracker: number;
+    maxTrackers: number;
+    hostConcurrency: number;
+    trackerConcurrency: number;
+    maxResponseBytes: number;
+    maxTotalBytes: number;
+    maxOutputs: number;
+    maxEvidenceOutputs: number;
+    maxEvidenceBytes: number;
+}
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Interface: LookupQueryOptions
 
 ```ts
 export interface LookupQueryOptions {
-    onEvidence?: (event: LookupEvidenceEvent) => void | Promise<void>;
+    signal?: AbortSignal;
     evidenceLimits?: {
         maxOutputs?: number;
         maxBytes?: number;
     };
+    deadlineMs?: number;
+    limits?: Partial<LookupLimits>;
+    onEvidence?: (event: LookupEvidenceEvent) => void | Promise<void>;
     graceMs?: number;
     softTimeoutMs?: number;
     onUnreachableHost?: (info: UnreachableHostInfo) => void | Promise<void>;
@@ -198,7 +278,7 @@ export interface LookupQueryOptions {
 }
 ```
 
-See also: [LookupEvidenceEvent](./overlay-tools.md#type-lookupevidenceevent), [UnreachableHostInfo](./overlay-tools.md#interface-unreachablehostinfo)
+See also: [LookupEvidenceEvent](./overlay-tools.md#type-lookupevidenceevent), [LookupLimits](./overlay-tools.md#interface-lookuplimits), [UnreachableHostInfo](./overlay-tools.md#interface-unreachablehostinfo)
 
 #### Property correlationId
 
@@ -208,11 +288,22 @@ Correlates resolver and downstream wallet telemetry without logging the query pa
 correlationId?: string
 ```
 
+#### Property deadlineMs
+
+Whole attempt budget including discovery and queued hosts. Default 10000 ms.
+
+```ts
+deadlineMs?: number
+```
+
 #### Property evidenceLimits
 
 Callback intake budget, independent of legacy aggregation. Defaults to 512
 outputs / 16 MiB of BEEF and context bytes. Values must be positive safe
 integers. Coordinate these with a downstream verifier's admission limits.
+Precedence when both this and `limits.maxEvidenceOutputs`/`maxEvidenceBytes`
+are supplied for the same call: `evidenceLimits` wins, then `limits`, then
+the resolver's configured limits, then the library defaults.
 
 ```ts
 evidenceLimits?: {
@@ -240,13 +331,25 @@ code. `waitForAllHosts` takes precedence when both are supplied.
 holdForUnknownHosts?: boolean
 ```
 
+#### Property limits
+
+Per-query operational resource limits (discovery, transport and queueing
+bounds). `limits.maxEvidenceOutputs`/`maxEvidenceBytes` also set the
+evidence intake budget, but the `evidenceLimits` shorthand above takes
+precedence over these two fields when both are supplied.
+
+```ts
+limits?: Partial<LookupLimits>
+```
+See also: [LookupLimits](./overlay-tools.md#interface-lookuplimits)
+
 #### Property onEvidence
 
 Owned, UNTRUSTED receipts before legacy txid/outpoint deduplication. Enqueue
 promptly; callback completion is not awaited and failures are isolated.
 Intake stops at the configured evidenceLimits, reporting one limit event.
-No callbacks occur after the query iterator closes. Legacy answers, host
-scheduling, timeout and reputation behavior are unchanged.
+No callbacks occur after the query iterator closes. Raw `query$` snapshots
+remain unverified transport aggregates, not cryptographic proof.
 
 ```ts
 onEvidence?: (event: LookupEvidenceEvent) => void | Promise<void>
@@ -264,6 +367,18 @@ to let the originating overlay operator know about a stale advertisement.
 onUnreachableHost?: (info: UnreachableHostInfo) => void | Promise<void>
 ```
 See also: [UnreachableHostInfo](./overlay-tools.md#interface-unreachablehostinfo)
+
+#### Property signal
+
+Abort this query without cancelling discovery still owned by another query.
+`query()` and `queryDetailed()` reject with an `AbortError` once this
+signal fires: a cancelled attempt never answered the question, so it is
+never reported as an empty output list. `query$()` keeps emitting its
+terminal snapshot with `terminalReason: 'cancelled'` instead.
+
+```ts
+signal?: AbortSignal
+```
 
 #### Property softTimeoutMs
 
@@ -332,6 +447,21 @@ service: string
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Interface: LookupRequestOptions
+
+Optional bounded transport settings; older custom facilitators may ignore these.
+
+```ts
+export interface LookupRequestOptions {
+    maxResponseBytes?: number;
+    maxOutputs?: number;
+    consumeBytes?: (bytes: number) => void;
+}
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Interface: LookupResolution
 
 A lookup answer together with the host settlement evidence behind it.
@@ -354,6 +484,7 @@ Configuration options for the Lookup resolver.
 
 ```ts
 export interface LookupResolverConfig {
+    limits?: Partial<LookupLimits>;
     networkPreset?: LookupNetworkPreset;
     facilitator?: OverlayLookupFacilitator;
     slapTrackers?: string[];
@@ -368,7 +499,7 @@ export interface LookupResolverConfig {
 }
 ```
 
-See also: [LookupNetworkPreset](./overlay-tools.md#type-lookupnetworkpreset), [OverlayLookupFacilitator](./overlay-tools.md#interface-overlaylookupfacilitator)
+See also: [LookupLimits](./overlay-tools.md#interface-lookuplimits), [LookupNetworkPreset](./overlay-tools.md#type-lookupnetworkpreset), [OverlayLookupFacilitator](./overlay-tools.md#interface-overlaylookupfacilitator)
 
 #### Property additionalHosts
 
@@ -402,6 +533,15 @@ Map of lookup service names to arrays of hosts to use in place of resolving via 
 ```ts
 hostOverrides?: Record<string, string[]>
 ```
+
+#### Property limits
+
+Defaults for the bounded discovery, scheduler and receipt intake.
+
+```ts
+limits?: Partial<LookupLimits>
+```
+See also: [LookupLimits](./overlay-tools.md#interface-lookuplimits)
 
 #### Property networkPreset
 
@@ -446,6 +586,45 @@ telemetry?: TelemetryConfig
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Interface: LookupResponseReaderOptions
+
+Options controlling a bounded lookup response read.
+
+```ts
+export interface LookupResponseReaderOptions {
+    signal?: AbortSignal;
+    maxResponseBytes: number;
+    consumeBytes?: (bytes: number) => void;
+}
+```
+
+#### Property consumeBytes
+
+Charges accepted bytes to the caller's aggregate response budget.
+
+```ts
+consumeBytes?: (bytes: number) => void
+```
+
+#### Property maxResponseBytes
+
+Maximum number of response bytes to retain.
+
+```ts
+maxResponseBytes: number
+```
+
+#### Property signal
+
+Cancels a pending stream read when the lookup request is aborted.
+
+```ts
+signal?: AbortSignal
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Interface: OverlayBroadcastFacilitator
 
 Facilitates transaction broadcasts that return STEAK.
@@ -467,20 +646,20 @@ Facilitates lookups to URLs that return answers.
 
 ```ts
 export interface OverlayLookupFacilitator {
-    lookup: (url: string, question: LookupQuestion, timeout?: number) => Promise<LookupFacilitatorAnswer>;
+    lookup: (url: string, question: LookupQuestion, timeout?: number, signal?: AbortSignal, options?: LookupRequestOptions) => Promise<LookupFacilitatorAnswer>;
 }
 ```
 
-See also: [LookupFacilitatorAnswer](./overlay-tools.md#type-lookupfacilitatoranswer), [LookupQuestion](./overlay-tools.md#interface-lookupquestion)
+See also: [LookupFacilitatorAnswer](./overlay-tools.md#type-lookupfacilitatoranswer), [LookupQuestion](./overlay-tools.md#interface-lookupquestion), [LookupRequestOptions](./overlay-tools.md#interface-lookuprequestoptions)
 
 #### Property lookup
 
 Returns a lookup answer for a lookup question
 
 ```ts
-lookup: (url: string, question: LookupQuestion, timeout?: number) => Promise<LookupFacilitatorAnswer>
+lookup: (url: string, question: LookupQuestion, timeout?: number, signal?: AbortSignal, options?: LookupRequestOptions) => Promise<LookupFacilitatorAnswer>
 ```
-See also: [LookupFacilitatorAnswer](./overlay-tools.md#type-lookupfacilitatoranswer), [LookupQuestion](./overlay-tools.md#interface-lookupquestion)
+See also: [LookupFacilitatorAnswer](./overlay-tools.md#type-lookupfacilitatoranswer), [LookupQuestion](./overlay-tools.md#interface-lookupquestion), [LookupRequestOptions](./overlay-tools.md#interface-lookuprequestoptions)
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
@@ -644,8 +823,11 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 | [HTTPSOverlayBroadcastFacilitator](#class-httpsoverlaybroadcastfacilitator) |
 | [HTTPSOverlayLookupFacilitator](#class-httpsoverlaylookupfacilitator) |
 | [HostReputationTracker](#class-hostreputationtracker) |
+| [LookupDiscovery](#class-lookupdiscovery) |
 | [LookupHTTPError](#class-lookuphttperror) |
+| [LookupHostQueue](#class-lookuphostqueue) |
 | [LookupResolver](#class-lookupresolver) |
+| [LookupResourceLimitError](#class-lookupresourcelimiterror) |
 | [OverlayAdminTokenTemplate](#class-overlayadmintokentemplate) |
 | [TopicBroadcaster](#class-topicbroadcaster) |
 
@@ -676,11 +858,11 @@ export class HTTPSOverlayLookupFacilitator implements OverlayLookupFacilitator {
     fetchClient: typeof fetch;
     allowHTTP: boolean;
     constructor(httpClient = defaultFetch, allowHTTP: boolean = false) 
-    async lookup(url: string, question: LookupQuestion, timeout: number = 2000): Promise<LookupFacilitatorAnswer> 
+    async lookup(url: string, question: LookupQuestion, timeout: number = 2000, signal?: AbortSignal, options?: LookupRequestOptions): Promise<LookupFacilitatorAnswer> 
 }
 ```
 
-See also: [LookupFacilitatorAnswer](./overlay-tools.md#type-lookupfacilitatoranswer), [LookupQuestion](./overlay-tools.md#interface-lookupquestion), [OverlayLookupFacilitator](./overlay-tools.md#interface-overlaylookupfacilitator)
+See also: [LookupFacilitatorAnswer](./overlay-tools.md#type-lookupfacilitatoranswer), [LookupQuestion](./overlay-tools.md#interface-lookupquestion), [LookupRequestOptions](./overlay-tools.md#interface-lookuprequestoptions), [OverlayLookupFacilitator](./overlay-tools.md#interface-overlaylookupfacilitator)
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
@@ -712,6 +894,24 @@ flush(): void
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Class: LookupDiscovery
+
+One bounded refresh shared only by subscribers of the same resolver/configuration.
+
+```ts
+export class LookupDiscovery {
+    readonly controller = new AbortController();
+    readonly state: LookupDiscoveryUpdate;
+    constructor(private readonly trackers: string[], private readonly limits: LookupLimits, private readonly lookup: (tracker: string, signal: AbortSignal, consume: (bytes: number) => void) => Promise<string[]>, private readonly finish: (state: LookupDiscoveryUpdate, abandoned: boolean) => void) 
+    subscribe(listener: (state: LookupDiscoveryUpdate) => void): () => void 
+}
+```
+
+See also: [LookupDiscoveryUpdate](./overlay-tools.md#interface-lookupdiscoveryupdate), [LookupLimits](./overlay-tools.md#interface-lookuplimits)
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Class: LookupHTTPError
 
 An HTTP failure with enough classification for reputation handling.
@@ -729,6 +929,23 @@ See also: [LookupHTTPErrorKind](./overlay-tools.md#type-lookuphttperrorkind)
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
 ---
+### Class: LookupHostQueue
+
+A bounded FIFO within each source, round-robin between sources.
+
+```ts
+export class LookupHostQueue {
+    readonly done = new Promise<void>(resolve => { this.resolveDone = resolve; });
+    constructor(private readonly maxHosts: number, private readonly concurrency: number, private readonly run: (host: string) => Promise<void>, private readonly skipped: (count: number, limited: boolean) => void) 
+    add(source: string, hosts: string[]): void 
+    finishSources(): void 
+    cancel(): void 
+}
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Class: LookupResolver
 
 Represents a Lookup Resolver.
@@ -738,7 +955,7 @@ export default class LookupResolver {
     constructor(config: LookupResolverConfig = {}) 
     async query(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): Promise<LookupAnswer> 
     async queryDetailed(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): Promise<LookupResolution> 
-    async *query$(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): AsyncIterable<LookupAnswerProgress> 
+    query$(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): AsyncIterable<LookupAnswerProgress> 
 }
 ```
 
@@ -752,10 +969,24 @@ Optional `options.graceMs` overrides the per-call grace window (default 80 ms).
 Optional `options.softTimeoutMs` resolves the query early with whatever has arrived once any host has
 answered (or with an empty result if no host has answered by `softTimeoutMs`).
 
+Throws an `AbortError` when `options.signal` aborted the attempt, so a
+cancelled lookup is never mistaken for an authoritative empty answer.
+
 ```ts
 async query(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): Promise<LookupAnswer> 
 ```
 See also: [LookupAnswer](./overlay-tools.md#type-lookupanswer), [LookupQueryOptions](./overlay-tools.md#interface-lookupqueryoptions), [LookupQuestion](./overlay-tools.md#interface-lookupquestion)
+
+#### Method query$
+
+Cumulative unverified results. Discovery remains subscribed while trackers
+settle; each new host enters the bounded queue immediately. Caller abort,
+deadline and iterator close release this query's ownership.
+
+```ts
+query$(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): AsyncIterable<LookupAnswerProgress> 
+```
+See also: [LookupAnswerProgress](./overlay-tools.md#interface-lookupanswerprogress), [LookupQueryOptions](./overlay-tools.md#interface-lookupqueryoptions), [LookupQuestion](./overlay-tools.md#interface-lookupquestion)
 
 #### Method queryDetailed
 
@@ -763,10 +994,29 @@ Performs a lookup and returns both its answer and the host settlement
 evidence required by security-sensitive consumers to distinguish an
 authoritative empty result from an availability failure.
 
+Throws an `AbortError` when `options.signal` aborted the attempt, rather
+than returning a resolution whose empty answer would have to be
+re-qualified against `progress.terminalReason`. When a client resource
+budget was exhausted during SLAP discovery, before any host could be
+admitted, it throws `LookupResourceLimitError` naming that limit; the
+historical no-competent-hosts error is reserved for a deadline or a
+settled attempt that genuinely found no host.
+
 ```ts
 async queryDetailed(question: LookupQuestion, timeout?: number, options?: LookupQueryOptions): Promise<LookupResolution> 
 ```
 See also: [LookupQueryOptions](./overlay-tools.md#interface-lookupqueryoptions), [LookupQuestion](./overlay-tools.md#interface-lookupquestion), [LookupResolution](./overlay-tools.md#interface-lookupresolution)
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+### Class: LookupResourceLimitError
+
+```ts
+export class LookupResourceLimitError extends Error {
+    constructor(readonly limit: string) 
+}
+```
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
@@ -930,6 +1180,66 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 ---
 ## Functions
 
+| |
+| --- |
+| [lookupAbortError](#function-lookupaborterror) |
+| [lookupLimits](#function-lookuplimits) |
+| [normalizeLookupHost](#function-normalizelookuphost) |
+| [readLookupResponseBytes](#function-readlookupresponsebytes) |
+| [withDoubleSpendRetry](#function-withdoublespendretry) |
+| [withLookupAbort](#function-withlookupabort) |
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+
+### Function: lookupAbortError
+
+```ts
+export function lookupAbortError(): Error 
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+### Function: lookupLimits
+
+```ts
+export function lookupLimits(...overrides: Array<Partial<LookupLimits> | undefined>): LookupLimits 
+```
+
+See also: [LookupLimits](./overlay-tools.md#interface-lookuplimits)
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+### Function: normalizeLookupHost
+
+Preserve distinct paths and ports; remove only a final slash and URL fragments.
+
+```ts
+export function normalizeLookupHost(host: string, allowParameters: boolean = false): string | null 
+```
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+### Function: readLookupResponseBytes
+
+Reads a lookup response incrementally while enforcing a per-response bound.
+
+This deliberately does not use Response.text(), json(), or arrayBuffer(),
+because those APIs buffer the complete body before a limit can be enforced.
+
+```ts
+export async function readLookupResponseBytes(response: Response, options: LookupResponseReaderOptions): Promise<Uint8Array> 
+```
+
+See also: [LookupResponseReaderOptions](./overlay-tools.md#interface-lookupresponsereaderoptions)
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Function: withDoubleSpendRetry
 
 Executes an operation with automatic retry logic for double-spend errors.
@@ -958,6 +1268,17 @@ Argument Details
 Throws
 
 If max retries exceeded or non-double-spend error occurs
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
+### Function: withLookupAbort
+
+A non-cooperative transport cannot retain a cancelled waiter.
+
+```ts
+export async function withLookupAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> 
+```
 
 Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
 
@@ -1093,6 +1414,7 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 
 | |
 | --- |
+| [DEFAULT_LOOKUP_LIMITS](#variable-default_lookup_limits) |
 | [DEFAULT_SLAP_TRACKERS](#variable-default_slap_trackers) |
 | [DEFAULT_TESTNET_SLAP_TRACKERS](#variable-default_testnet_slap_trackers) |
 | [DEFAULT_TTN_SLAP_TRACKERS](#variable-default_ttn_slap_trackers) |
@@ -1102,6 +1424,28 @@ Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](
 
 ---
 
+### Variable: DEFAULT_LOOKUP_LIMITS
+
+```ts
+DEFAULT_LOOKUP_LIMITS: Readonly<LookupLimits> = Object.freeze({
+    maxHosts: 256,
+    maxHostsPerTracker: 64,
+    maxTrackers: 16,
+    hostConcurrency: 8,
+    trackerConcurrency: 4,
+    maxResponseBytes: 32 * 1024 * 1024,
+    maxTotalBytes: 64 * 1024 * 1024,
+    maxOutputs: 4096,
+    maxEvidenceOutputs: 512,
+    maxEvidenceBytes: 16 * 1024 * 1024
+})
+```
+
+See also: [LookupLimits](./overlay-tools.md#interface-lookuplimits)
+
+Links: [API](#api), [Interfaces](#interfaces), [Classes](#classes), [Functions](#functions), [Types](#types), [Enums](#enums), [Variables](#variables)
+
+---
 ### Variable: DEFAULT_SLAP_TRACKERS
 
 ```ts
