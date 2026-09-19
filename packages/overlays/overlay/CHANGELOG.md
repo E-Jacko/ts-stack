@@ -24,8 +24,11 @@ All notable changes to this project will be documented in this file. The format 
 - Adds `storageHasAdmission` for the optional `Storage.admission` field.
 - Adds an opt-in MongoDB schema, payload-publication, reference-guard, and
   payload-GC foundation behind an optional `mongodb` peer. It does not activate
-  MongoDB in Engine, select a new default adapter, or provide an admission
-  receipt path.
+  MongoDB as the overlay default or select a new SQL adapter.
+- Adds an opt-in Mongo `AdmissionStorage` adapter and Engine submit path that
+  uses `commitAdmission` when `overlay-admission-v1` is advertised, with
+  enlisted same-session indexes or a durable projection outbox, majority ACK,
+  and SQL/Knex compatibility retained.
 - Added bounded BASM JSON peer validation, classified capability/resource errors,
   canonical header and optional full-block-count position checks, and explicit
   position assurance in sync reports. Fixed default forward pages to fit the
@@ -55,6 +58,30 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 - (Document bugs that were fixed since the last release.)
+- Exclude already-applied (dupe) topics from the Mongo admission plan's
+  identity, decisions and commit, instead of resubmitting them for admission.
+  A dupe topic no longer reaches `commitAdmission`; when every remaining
+  topic is a dupe or a failure, `Engine.submit` returns the in-memory STEAK
+  without building or committing a plan at all, and on a mixed submission
+  only the genuinely new topics are committed while the STEAK still reports
+  the dupe as accepted-with-nothing-new. Previously a resubmitted dupe was
+  still treated as accepted and given a decision, which
+  `MongoAdmissionStorage.assertAppliedAvailable` rejects whenever that topic
+  was already applied under a different admission operation — breaking
+  historical-then-live resubmits and multi-topic retries with
+  `Overlay admission rejected: invalid-plan` or `digest-mismatch`.
+- `MongoOverlayStorage` no longer maps an evicted output document to a live
+  `Output`. `toOutput` now returns `null` for a `state: 'evicted'` document
+  (evictions persist their row for audit/history, they do not delete it),
+  and every read path (`findOutput`, `findOutputsForTransaction`,
+  `findUTXOsForTopic`) drops a `null` mapping the same way it already
+  excludes `evicted` at the query level, so a future read path that forgets
+  that query-level filter cannot resurface an evicted UTXO as unspent.
+  `findOutput`/`findOutputsForTransaction` also hydrate `outputsConsumed`
+  and `consumedBy` from the `consumptionEdges` persisted by the admission
+  commit (or by `updateConsumedBy` on the classic path) instead of always
+  returning them empty, so Engine history/delete paths can see consumption
+  edges written during admission.
 
 ### Security
 - (Notify of any improvements related to security vulnerabilities or potential risks.)
