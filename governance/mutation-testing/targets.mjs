@@ -118,8 +118,8 @@ export function buildMutationTargets(repositoryRoot) {
         ],
         [
           'src/auth/Peer.ts',
-          'private stopListeningForInitialResponsesByNonce (',
-          'private propagateTransportError ('
+          'private stopListeningForInitialResponsesByNonce(',
+          'private propagateTransportError('
         ],
         [
           'src/auth/clients/AuthFetch.ts',
@@ -148,18 +148,18 @@ export function buildMutationTargets(repositoryRoot) {
         ],
         [
           'src/auth/transports/SimplifiedFetchTransport.ts',
-          'private async sendAuthMessage(message: AuthMessage): Promise<void> {',
-          'private encodeRequestBody('
+          'async #sendAuthMessage(message: AuthMessage): Promise<void> {',
+          '#encodeRequestBody('
         ],
         [
           'src/auth/transports/SimplifiedFetchTransport.ts',
-          'this.validateResponseAuthentication(url, response, body)',
+          'this.#validateResponseAuthentication(url, response, body)',
           'Registers a callback to handle incoming messages.'
         ],
         [
           'src/auth/transports/SimplifiedFetchTransport.ts',
           'async onData(callback:',
-          'private createNetworkError('
+          '#createNetworkError('
         ]
       ].map(([filePath, startMarker, endMarker]) =>
         sourceLineRange(repositoryRoot, 'packages/sdk', filePath, startMarker, endMarker)

@@ -25,6 +25,16 @@ state. Sender blinding and transfers without input linkage remain supported
 when authoritative owner state is present. Linkage arrays require unique,
 non-negative integer indices.
 
+Token amounts and every per-asset input, output, issuance, redemption, and
+reissue total must remain positive safe integers. The manager rejects aggregate
+overflow and requires conservation across the union of input, output, and
+authorized-supply assets, so consuming all inputs is not an implicit
+unauthorized burn. A custom \`ScreeningProvider\` must return the exact booleans
+\`true\` or \`false\`; missing or type-confused verdicts fail closed.
+Transactions carrying an admitted administrative output also screen the exact
+identity of the configured administrative wallet, so issuance and other admin
+actions cannot omit their local authority from policy evaluation.
+
 Before upgrading an existing Mandala deployment, back up and audit its admin
 history and token-owner records. Restore missing rows from verified admission
 evidence before historical replay; do not infer authority from a submitted

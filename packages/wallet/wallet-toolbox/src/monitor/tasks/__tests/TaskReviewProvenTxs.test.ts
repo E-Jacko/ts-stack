@@ -435,4 +435,23 @@ describe('TaskReviewProvenTxs tests', () => {
     expect(nextCheckpoint.updatedTransactions).toBe(1)
     expect(nextCheckpoint.reviewedThroughHeight).toBe(150)
   })
+
+  test('15 ignores malformed persisted heights and rejects an unsafe chain tip', async () => {
+    const m = makeMonitor({
+      tipHeight: Number.MAX_SAFE_INTEGER,
+      monitorEvents: [
+        { details: JSON.stringify({ reviewedThroughHeight: -1 }) },
+        { details: JSON.stringify({ reviewedThroughHeight: 1.5 }) }
+      ]
+    })
+    const task = new TaskReviewProvenTxs(m.monitor as any)
+    jest
+      .spyOn(task.storage, 'runAsStorageProvider')
+      .mockImplementation(
+        async (fn: any) => await fn({ findMonitorEvents: m.findMonitorEvents, findProvenTxs: async () => [] })
+      )
+
+    await expect(task.getLastReviewedHeight()).resolves.toBeUndefined()
+    await expect(task.runTask()).rejects.toThrow('chain tip height')
+  })
 })

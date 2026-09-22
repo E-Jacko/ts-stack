@@ -621,6 +621,43 @@ describe('SimplifiedFetchTransport deserializeRequestPayload', () => {
     expect(typeof result.requestId).toBe('string')
     expect(result.requestId.length).toBeGreaterThan(0)
   })
+
+  test('rejects trailing bytes and an excessive declared header count', () => {
+    expect(() => transport.deserializeRequestPayload([...buildGeneralPayload(), 0])).toThrow(
+      'trailing bytes'
+    )
+
+    const writer = new Utils.Writer()
+    writer.write(Array.from({ length: 32 }).fill(0))
+    writer.writeVarIntNum(0)
+    writer.writeVarIntNum(0)
+    writer.writeVarIntNum(0)
+    writer.writeVarIntNum(129)
+    expect(() => transport.deserializeRequestPayload(writer.toArray())).toThrow(
+      'header count exceeds its limit'
+    )
+  })
+
+  test('rejects duplicate request headers rather than silently overwriting signed data', () => {
+    const writer = new Utils.Writer()
+    writer.write(Array.from({ length: 32 }).fill(0))
+    writer.writeVarIntNum(0)
+    writer.writeVarIntNum(0)
+    writer.writeVarIntNum(0)
+    writer.writeVarIntNum(2)
+    for (const value of ['first', 'second']) {
+      const key = Utils.toArray('x-bsv-name', 'utf8')
+      const encodedValue = Utils.toArray(value, 'utf8')
+      writer.writeVarIntNum(key.length)
+      writer.write(key)
+      writer.writeVarIntNum(encodedValue.length)
+      writer.write(encodedValue)
+    }
+    writer.writeVarIntNum(-1)
+    expect(() => transport.deserializeRequestPayload(writer.toArray())).toThrow(
+      'duplicate header'
+    )
+  })
 })
 
 // ─── onData callback registration ────────────────────────────────────────────

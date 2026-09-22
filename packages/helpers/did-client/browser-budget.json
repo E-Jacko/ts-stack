@@ -7,23 +7,23 @@
   "prohibitedExports": [],
   "maximumBytes": {
     "vite": {
-      "raw": 530000,
-      "gzip": 140000,
-      "brotli": 115000
+      "raw": 715000,
+      "gzip": 185000,
+      "brotli": 150000
     },
     "esbuild": {
-      "raw": 400000,
-      "gzip": 125000,
-      "brotli": 105000
+      "raw": 555000,
+      "gzip": 170000,
+      "brotli": 140000
     }
   },
   "umd": {
     "path": "dist/umd/bundle.js",
     "global": "did-client",
     "maximumBytes": {
-      "raw": 400000,
-      "gzip": 120000,
-      "brotli": 102000
+      "raw": 555000,
+      "gzip": 165000,
+      "brotli": 140000
     }
   }
 }

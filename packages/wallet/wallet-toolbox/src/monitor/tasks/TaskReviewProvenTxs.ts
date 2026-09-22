@@ -1,5 +1,12 @@
 import { HeightRange } from '../../services/chaintracker/chaintracks/util/HeightRange'
 import { Monitor } from '../Monitor'
+import {
+  MAX_MONITOR_HEIGHT,
+  MAX_MONITOR_INTERVAL_MSECS,
+  MAX_MONITOR_PAGE_SIZE,
+  optionalMonitorInteger,
+  requireMonitorInteger
+} from '../monitorValidation'
 import { WalletMonitorTask } from './WalletMonitorTask'
 
 export interface ReviewHeightRangeResult {
@@ -54,6 +61,11 @@ export class TaskReviewProvenTxs extends WalletMonitorTask {
     public maxRetryHeightsPerRun = 25
   ) {
     super(monitor, TaskReviewProvenTxs.taskName)
+    requireMonitorInteger(triggerMsecs, 'triggerMsecs', 0, MAX_MONITOR_INTERVAL_MSECS)
+    requireMonitorInteger(maxHeightsPerRun, 'maxHeightsPerRun', 0, MAX_MONITOR_PAGE_SIZE)
+    requireMonitorInteger(minBlockAge, 'minBlockAge', 0, MAX_MONITOR_HEIGHT)
+    requireMonitorInteger(triggerQuickMsecs, 'triggerQuickMsecs', 0, MAX_MONITOR_INTERVAL_MSECS)
+    requireMonitorInteger(maxRetryHeightsPerRun, 'maxRetryHeightsPerRun', 0, MAX_MONITOR_PAGE_SIZE)
     this.triggerNextMsecs = this.triggerQuickMsecs
   }
 
@@ -69,16 +81,19 @@ export class TaskReviewProvenTxs extends WalletMonitorTask {
     TaskReviewProvenTxs.checkNow = false
 
     const chaintracks = this.monitor.chaintracksWithEvents || this.monitor.chaintracks
-    const tipHeight = await chaintracks.currentHeight()
+    const tipHeight = requireMonitorInteger(
+      await chaintracks.currentHeight(),
+      'chain tip height',
+      0,
+      MAX_MONITOR_HEIGHT
+    )
     const maxEligibleHeight = tipHeight - this.minBlockAge
     const checkpoint = await this.getLastCheckpoint()
     const lastReviewedHeight = checkpoint?.reviewedThroughHeight ?? (await this.getLastReviewedHeight())
     const startHeight = lastReviewedHeight === undefined ? 0 : lastReviewedHeight + 1
     const endHeight = Math.min(startHeight + this.maxHeightsPerRun - 1, maxEligibleHeight)
     const range = new HeightRange(startHeight, endHeight)
-    const priorRetryHeights = [...new Set(checkpoint?.retryHeights ?? [])].filter(
-      height => Number.isInteger(height) && height >= 0
-    )
+    const priorRetryHeights = [...new Set(checkpoint?.retryHeights ?? [])]
     // Retain temporarily ineligible heights if the tip retreats. Eligibility
     // limits this attempt, not the durable queue of unresolved work.
     const retryBatch =
@@ -201,7 +216,8 @@ export class TaskReviewProvenTxs extends WalletMonitorTask {
       // Start at height of first proven tx when it appears...
       const ptxs = await sp.findProvenTxs({ partial: {}, paged: { limit: 1, offset: 0 }, orderDescending: false })
       if (ptxs.length > 0) {
-        lastReviewedHeight = ptxs[0].height - 1
+        const firstHeight = optionalMonitorInteger(ptxs[0].height, 0, MAX_MONITOR_HEIGHT)
+        if (firstHeight !== undefined) lastReviewedHeight = firstHeight - 1
       }
     })
 
@@ -221,15 +237,23 @@ export class TaskReviewProvenTxs extends WalletMonitorTask {
     for (const event of events) {
       if (!event.details) continue
       try {
-        const parsed = JSON.parse(event.details) as Partial<ReviewProvenTxsCheckpoint>
-        if (typeof parsed.reviewedThroughHeight === 'number') {
-          return parsed
+        const parsed = JSON.parse(event.details) as unknown
+        if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+        const record = parsed as Record<string, unknown>
+        const reviewedThroughHeight = optionalMonitorInteger(record.reviewedThroughHeight, 0, MAX_MONITOR_HEIGHT)
+        if (reviewedThroughHeight === undefined) continue
+        const retryHeights: number[] = []
+        if (Array.isArray(record.retryHeights) && record.retryHeights.length <= MAX_MONITOR_PAGE_SIZE) {
+          for (const candidate of record.retryHeights) {
+            const height = optionalMonitorInteger(candidate, 0, MAX_MONITOR_HEIGHT)
+            if (height !== undefined && !retryHeights.includes(height)) retryHeights.push(height)
+          }
         }
+        return { reviewedThroughHeight, retryHeights }
       } catch {
         continue
       }
     }
-
     return undefined
   }
 }

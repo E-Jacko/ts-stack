@@ -4,7 +4,7 @@ title: '@bsv/overlay'
 kind: package
 domain: overlays
 npm: '@bsv/overlay'
-version: '2.6.0'
+version: '2.6.1'
 last_updated: '2026-09-18'
 last_verified: '2026-09-18'
 review_cadence_days: 30
@@ -235,6 +235,12 @@ invalid transactions stop appearing in lookup results immediately.
 - Supports SHIP (Service Host Interconnect Protocol) and SLAP (Service Lookup Availability Protocol) for peer discovery
 - Integrates Graph Aware Sync Protocol (GASP) for historical synchronization with other overlay nodes
 - Supports BRC-136 BASM primitives for topic anchors and chain reorg handling
+
+SHIP tracker responses are untrusted discovery hints. The Engine authenticates
+the canonical identity-linked advertisement signature and binds its
+one-satoshi output, BEEF/TXID, and requested topic before using the endpoint for
+GASP; the connection still requires the normal public-HTTPS and DNS-pinning
+controls.
 
 ## Common pitfalls
 

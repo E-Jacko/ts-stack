@@ -20,6 +20,15 @@ AuthFetch stops pending certificate dispatch and session recovery after its
 request deadline. An already dispatched request may still complete on the
 server; callers must resolve its outcome before retrying a non-idempotent write.
 
+AuthFetch's automatic BRC-105 payment path delegates spending authorization to
+the configured wallet's `createAction` policy. Use a wallet that requires the
+intended user or policy approval. Payment logs and terminal errors omit URL
+credentials/path/query, header values other than `Content-Type`, transaction
+bytes, and derivation material. Buffered received certificates are capped at
+the most recent 1,000 entries. Simplified authenticated HTTP frames, bodies,
+headers, signatures, request IDs, and certificate-request headers have fixed
+size/count limits and redirects are rejected.
+
 For signature payloads of at least 64 KiB, `ProtoWallet` uses asynchronous
 platform SHA-256 when Web Crypto is available, avoiding long synchronous
 hashing on browser UI threads. Unsupported or failed native hashing falls back
@@ -98,6 +107,25 @@ For a more detailed tutorial and advanced examples, check our [Documentation](#d
 
 - **Transaction Broadcast Management**: Mechanisms to send transactions to both miners and overlays, ensuring extensibility and future-proofing.
 
+  `ARC` snapshots its URL, credentials, callback settings, deployment ID, and
+  own custom headers when it is constructed. Reconstruct the broadcaster to
+  rotate those values; later mutation of the supplied configuration has no
+  effect. Custom headers must have valid HTTP token names and bounded,
+  control-free string values. An injected `HttpClient` is application-trusted
+  code and can select different transport behavior than the SDK defaults.
+  Provider responses remain untrusted: single and batch acknowledgements must
+  name the exact submitted transaction and a recognized ARC state before the
+  SDK returns success.
+
+  The Block Headers Service and What's On Chain trackers likewise accept only
+  canonical roots, bounded heights, own-data provider records, and an exact
+  confirmation for the requested root and height. Their configuration and API
+  credentials are snapshotted at construction. A caller-supplied Block Headers
+  Service URL and any injected `HttpClient` are explicit application trust
+  decisions. Teranode's submission protocol supplies status rather than a
+  returned transaction ID, so a successful HTTP status is authoritative only
+  to the extent that the caller trusts the selected Teranode endpoint.
+
 - **Merkle Proof Verification**: Tools for representing and verifying merkle proofs, adhering to various serialization standards.
 
   BUMP transaction offsets retain their exact nonnegative safe-integer domain,
@@ -117,6 +145,13 @@ For a more detailed tutorial and advanced examples, check our [Documentation](#d
   rejected peer responses reject and clean up the owning request; they do not
   become unhandled process errors or leave listeners behind.
 
+  Authenticated HTTP responses are streamed into a bounded buffer before they
+  enter the signed-message parser. Application bodies default to 16 MiB and
+  handshake bodies to 1 MiB; pass `maxResponseBytes` or
+  `maxHandshakeResponseBytes` in `SimplifiedFetchTransportOptions` when a
+  deployment needs a different ceiling. The parser also bounds header count
+  and bytes and rejects truncated, overlong, or trailing wire data.
+
   For BRC-105 payments, a recipient may include the optional
   `x-bsv-payment-known-txids` response header on its 402 challenge. The value is
   a comma-separated list of 64-character hexadecimal transaction IDs the
@@ -134,13 +169,45 @@ For a more detailed tutorial and advanced examples, check our [Documentation](#d
 - **Key Value Store**: Distributed key-value store for decentralized data storage and retrieval.
 
 Identity publication rejects a certificate unless its certifier signature
-verifies affirmatively. `GlobalKVStore` likewise treats overlay responses as
-untrusted and returns only entries with a valid controller signature; a
-verification error or `valid: false` result is rejected.
+verifies affirmatively. `GlobalKVStore` treats overlay responses as untrusted:
+it requires a canonical, bounded controller-signed token whose locking key is
+derived from the claimed controller, binds the exact BEEF output to the lookup
+selector, and rejects ambiguous unique lookups or failed overlay acknowledgments.
+Optional history follows only the selected controller's exact spent-output
+lineage, excluding sibling outputs and unrelated funding ancestry. The configured
+lookup resolver remains authoritative for which signed outpoints are current:
+transaction inclusion and a field signature do not prove that an outpoint remains
+unspent. Do not use a remotely resolved current value as the sole basis for an
+authorization decision without independently verifying fresh active-state evidence.
+`LocalKVStore` likewise authenticates the exact wallet-listed BEEF output,
+wallet-derived locking key, and field signature before reading or spending it.
 
 - **Distributed Storage**: Scalable and secure distributed data storage solutions to support blockchain applications.
 
+  `StorageDownloader` treats overlay advertisements as untrusted. It requires
+  the canonical six-field UHRP PushDrop token, host signature and derived
+  locking-key linkage, exact requested hash, non-expired metadata, bounded
+  ordinary or Atomic BEEF tied to the advertised output/transaction, and a
+  credential-free public HTTPS location. Ordinary BEEF remains supported for
+  existing lookup services; an additive transaction-ID hint, when supplied, is
+  required to select the exact transaction in that bundle. The reusable
+  `decodeAndVerifyUHRPAdvertisement()` export applies the same public-token
+  validation for overlay and service implementations.
+
+  Node.js public-network fetch helpers resolve, reject private/special-use
+  addresses, and pin the approved address into the connection. Browser runtimes
+  do not expose DNS resolution or connection pinning to JavaScript, so their
+  fallback can validate URL syntax and literal IPs only. Browser applications
+  must enforce private-network egress at a trusted proxy or service boundary;
+  URL validation alone is not DNS-rebinding protection.
+
 - **Wallet Interface**: Standardized interface for wallet operations, supporting multiple cryptocurrencies and protocols.
+
+  A BRC-100 originator is permission-scoped by its lowercase DNS hostname.
+  Callers may include a numeric port (including local-development ports), but
+  the wallet deliberately treats every port on that hostname as the same
+  originator. Schemes, credentials, paths, queries, fragments, IP literals,
+  and malformed ports are not originator values.
 
 - **Overlay Tools**: Advanced tools for overlay network management and optimization.
 
@@ -225,12 +292,23 @@ Thank you for being a part of the BSV Blockchain Libraries Project. Let's build 
 
 ## Certificate policy and observer callbacks
 
-SDK 2.7 records the locally requested certificate policy for each BRC-103
-session. Standalone responses must match one complete outstanding dynamic
-request or the session's handshake policy. Policies are copied before sending,
-so a later edit of the caller's object does not change validation. Responses
-never select their own validation policy. A different dynamic request cannot
-satisfy an unmet handshake requirement.
+SDK 3.0 records the locally requested certificate policy for each BRC-103
+session. Standalone responses must fit one complete locally recorded dynamic
+request allowlist or the session's handshake allowlist. Policies are copied
+before sending, so a later edit of the caller's object does not change
+validation. Responses never select their own validation policy. A different
+dynamic request cannot satisfy an unmet handshake requirement.
+
+The legacy v0.1 `RequestedCertificateSet` has no all-of, any-of, threshold, or
+optional-field expression. Compatibility validation therefore proves only that
+each supplied certificate and each non-empty disclosed-field subset is allowed
+by one locally recorded set. It does **not** prove that every listed certificate
+type or every requested field was supplied. Each party chooses what to request,
+what to provide, and how much to disclose. Before granting access, inspect the
+actual certificate types, certifiers, and decrypted fields and enforce the
+application's complete authorization policy. Terminate or constrain the
+session or operation when those actual disclosures are insufficient; peer
+authentication never declares the claims sufficient for the application.
 
 The v0.1 AuthMessage fields, signatures and encodings are unchanged. Because a
 certificateResponse does not echo the request nonce, concurrent responses are
@@ -239,11 +317,25 @@ successful dynamic response consumes one matching request; failed validation
 keeps it available for retry. Request the intended set explicitly instead of
 relying on unrequested certificates.
 
+An `initialRequest` is unsigned, and the v0.1 `initialResponse` signature binds
+the nonce pair and identity but not its `requestedCertificates` or
+`certificates` members. Built-in wallet proving encrypts revealed field keys to
+the requested identity, but a `listenForCertificatesRequested` callback can
+observe only a claimed identity during the initial exchange. Do not disclose
+plaintext or authorize side effects from that callback. Because the requested
+set is mutable, make every decision from the certificates and fields actually
+disclosed and validated, never from the request alone. Prefer wallet-backed
+proof creation, and use a signed post-authentication certificate request or an
+application-layer integrity check when request integrity itself matters.
+
 `listenForCertificatesReceived` is an observer. The SDK commits certificate
 validation and releases its waiters before invoking listeners. A throwing or
 rejecting listener stops later listeners and rejects message handling, but does
-not roll back validation. Apply the requested certificate policy and explicit
-application authorization before performing protected work.
+not roll back validation. The callback's third argument is the local session
+nonce and its optional fourth argument is the peer nonce, allowing adapters to
+bind application approval to the exact validated exchange; existing two-argument
+callbacks remain compatible. Apply the requested certificate policy and
+explicit application authorization before performing protected work.
 
 Custom `AsyncSessionManager` implementations must retain the complete
 `PeerSession`, including the optional local `certificatePolicy` and
@@ -251,3 +343,34 @@ Custom `AsyncSessionManager` implementations must retain the complete
 Peer serializes its own certificate read-modify-write operations; shared stores
 must also coordinate writers across instances. Older stored sessions without
 these fields use the configured handshake policy.
+
+BRC-103 message nonces are one-time values. The in-process `SessionManager`
+atomically consumes each verified signed nonce, retains at most 10,000 sessions
+for 30 minutes of idle time by default, and caps replay claims per session. At
+capacity it evicts only unauthenticated sessions; if every slot is
+authenticated, new handshakes fail until a session expires or is removed.
+Session reads validate only the addressed session or identity bucket, avoiding
+a global scan on every authenticated message. The unsigned initial-request
+replay cache is also bounded; at capacity it evicts its oldest claim instead of
+letting unauthenticated traffic globally disable new handshakes. Replay
+protection for those unsigned requests is therefore bounded by both the
+configured idle lifetime and cache cardinality. Signed per-session message
+nonces continue to fail closed at their configured cap.
+Shared `AsyncSessionManager` implementations must provide an atomic
+`claimMessageNonce` and `claimInitialRequestNonce` backed by uniqueness
+constraints or compare-and-set; Peer fails closed when an asynchronous store
+omits either operation. Their unsigned initial-request cache should likewise
+apply global and identity-scoped bounds, evicting the oldest claim at capacity
+instead of failing all new handshakes. An incoming `initialRequest` only claims
+an identity and creates a partial session. The requester becomes authenticated
+only after a valid signed follow-up proves control of that key. Exact
+initial-request replay is rejected before session, wallet, or callback work.
+
+When `Peer` is allowed to remember a destination, only a successful locally
+initiated handshake updates that implicit destination. Inbound messages cannot
+retarget a later call that omits `identityKey`.
+
+These controls authenticate peers and protect message integrity and freshness;
+they do not encrypt the transport. Applications must use a confidential
+transport such as correctly verified TLS and must separately authorize the
+authenticated identity for every protected operation.

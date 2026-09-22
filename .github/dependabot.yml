@@ -26,6 +26,8 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7
     ignore:
       # First-party workspace versions are reconciled after publishing by
       # scripts/sync-versions.mjs and the release workflow. Ownership and
@@ -64,6 +66,8 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7
     ignore:
       # Same release-aware first-party policy as the root workspace; see
       # governance/repository-health/projects.json#dependencyAutomation.
@@ -107,6 +111,8 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7
     exclude-paths:
       - Dockerfile
       - '**/Dockerfile'
@@ -139,6 +145,8 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7
     ignore:
       # Node 24 is the owned contributor, CI, release, and container runtime.
       # A Node major moves only as a coordinated stack migration; patch/minor
@@ -153,6 +161,8 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: uv
     directory: /tools/codegen
@@ -160,6 +170,8 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: github-actions
     directory: /
@@ -167,3 +179,5 @@ updates:
       - '*'
     multi-ecosystem-group: monthly-stack-maintenance
     rebase-strategy: auto
+    cooldown:
+      default-days: 7

@@ -84,7 +84,9 @@ All notable changes to this project will be documented in this file. The format 
   edges written during admission.
 
 ### Security
-- (Notify of any improvements related to security vulnerabilities or potential risks.)
+- Authenticate canonical SHIP advertisements, bind their one-satoshi output,
+  transaction ID, and requested topic, and reject forged tracker results before
+  selecting a GASP synchronization endpoint.
 
 ---
 

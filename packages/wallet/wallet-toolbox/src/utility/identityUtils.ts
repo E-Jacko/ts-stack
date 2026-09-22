@@ -2,7 +2,6 @@ import {
   LookupAnswer,
   PushDrop,
   VerifiableCertificate,
-  Utils,
   ProtoWallet,
   LookupResolver,
   DiscoverCertificatesResult,
@@ -16,8 +15,101 @@ import {
   VerifiedTransactionOutput,
   defaultTransactionEvidenceLimits
 } from '@bsv/sdk'
-import { Certifier, TrustSettings } from '../WalletSettingsManager'
+import { toUTF8Strict } from '@bsv/sdk/primitives/utils'
+import { TrustSettings, validateTrustSettings } from '../WalletSettingsManager'
 import { OverlayOutputEvidence } from './verifyOverlayOutput'
+
+const MAX_IDENTITY_RESULTS = 256
+const MAX_IDENTITY_CERTIFICATE_BYTES = 256 * 1024
+const MAX_IDENTITY_FIELDS = 100
+const IDENTITY_PROTOCOL: [1, 'identity'] = [1, 'identity']
+const IDENTITY_KEY_ID = '1'
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function ownData(value: Record<string, unknown>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+  if (descriptor == null || !('value' in descriptor)) {
+    throw new Error(`Identity certificate ${key} must be an own data property`)
+  }
+  return descriptor.value
+}
+
+function boundedBytes(value: unknown, field: string, minimum: number, maximum: number): number[] {
+  const normalized = value instanceof Uint8Array ? Array.from(value) : value
+  if (!Array.isArray(normalized) || normalized.length < minimum || normalized.length > maximum) {
+    throw new Error(`${field} must contain ${minimum}-${maximum} bytes`)
+  }
+  for (let index = 0; index < normalized.length; index++) {
+    if (
+      !Object.prototype.hasOwnProperty.call(normalized, index) ||
+      !Number.isInteger(normalized[index]) ||
+      normalized[index] < 0 ||
+      normalized[index] > 255
+    ) {
+      throw new Error(`${field} must be a dense byte array`)
+    }
+  }
+  return Array.from(normalized)
+}
+
+function pushOpcode(value: number[]): number {
+  if (value.length <= 75) return value.length
+  if (value.length <= 0xff) return 0x4c
+  if (value.length <= 0xffff) return 0x4d
+  return 0x4e
+}
+
+function certificateRecord(encoded: number[]): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(toUTF8Strict(encoded))
+  if (!isPlainRecord(parsed)) throw new Error('Identity certificate must be a plain object')
+  const allowed = new Set([
+    'type',
+    'serialNumber',
+    'subject',
+    'certifier',
+    'revocationOutpoint',
+    'fields',
+    'keyring',
+    'signature'
+  ])
+  for (const key of Reflect.ownKeys(parsed)) {
+    if (typeof key !== 'string' || !allowed.has(key)) {
+      throw new Error('Identity certificate contains an unexpected field')
+    }
+    ownData(parsed, key)
+  }
+  for (const key of allowed) ownData(parsed, key)
+  const fields = ownData(parsed, 'fields')
+  const keyring = ownData(parsed, 'keyring')
+  if (!isPlainRecord(fields) || !isPlainRecord(keyring)) {
+    throw new Error('Identity certificate fields and keyring must be plain objects')
+  }
+  const fieldNames = Object.keys(fields)
+  const keyringNames = Object.keys(keyring)
+  if (
+    fieldNames.length < 1 ||
+    fieldNames.length > MAX_IDENTITY_FIELDS ||
+    keyringNames.length < 1 ||
+    keyringNames.length > MAX_IDENTITY_FIELDS
+  ) {
+    throw new Error('Identity certificate fields or keyring have invalid cardinality')
+  }
+  for (const fieldName of keyringNames) {
+    if (!Object.prototype.hasOwnProperty.call(fields, fieldName)) {
+      throw new Error('Identity keyring refers to an absent certificate field')
+    }
+    const key = ownData(keyring, fieldName)
+    if (typeof key !== 'string' || key.length > 2048) {
+      throw new Error('Identity keyring value is missing or oversized')
+    }
+  }
+  return parsed
+}
 
 // Our extended certificate includes certifierInfo.
 export interface ExtendedVerifiableCertificate extends IdentityCertificate {
@@ -25,11 +117,43 @@ export interface ExtendedVerifiableCertificate extends IdentityCertificate {
   publiclyRevealedKeyring: Record<string, Base64String>
 }
 
+function identityAttributeMatches(actual: unknown, expected: string): boolean {
+  return typeof actual === 'string' && (actual === expected || actual.toLowerCase() === expected.toLowerCase())
+}
+
+/** Re-bind authenticated certificates to the identity lookup they answered. */
+export function filterCertificatesByIdentityKey(
+  certificates: VerifiableCertificate[],
+  identityKey: string
+): VerifiableCertificate[] {
+  const expected = identityKey.toLowerCase()
+  return certificates.filter(
+    certificate => typeof certificate.subject === 'string' && certificate.subject.toLowerCase() === expected
+  )
+}
+
+/** Re-bind authenticated certificates to the attribute lookup they answered. */
+export function filterCertificatesByAttributes(
+  certificates: VerifiableCertificate[],
+  attributes: Record<string, string>
+): VerifiableCertificate[] {
+  const expected = Object.entries(attributes)
+  return certificates.filter(certificate => {
+    const fields = certificate.decryptedFields
+    if (fields == null || typeof fields !== 'object' || Array.isArray(fields)) return false
+    return expected.every(([fieldName, value]) =>
+      identityAttributeMatches((fields as Record<string, unknown>)[fieldName], value)
+    )
+  })
+}
+
 // --- Helper Types for Grouping ---
 
 interface IdentityGroup {
   totalTrust: number
   members: ExtendedVerifiableCertificate[]
+  certifiers: Set<string>
+  certificates: Set<string>
 }
 
 /**
@@ -45,50 +169,63 @@ export const transformVerifiableCertificatesWithTrust = (
   trustSettings: TrustSettings,
   certificates: VerifiableCertificate[]
 ): DiscoverCertificatesResult => {
+  const validatedTrust = validateTrustSettings(trustSettings)
   // Group certificates by subject while accumulating trust.
-  const identityGroups: Record<string, IdentityGroup> = {}
+  const identityGroups = new Map<string, IdentityGroup>()
   // Cache certifier lookups.
-  const certifierCache: Record<string, Certifier> = {}
+  const certifierCache = new Map(
+    validatedTrust.trustedCertifiers.map(certifier => [certifier.identityKey, certifier] as const)
+  )
 
-  certificates.forEach(cert => {
+  certificates.slice(0, MAX_IDENTITY_RESULTS).forEach(cert => {
     const { subject, certifier } = cert
     if (subject === '' || certifier === '') return
 
-    // Lookup and cache certifier details from trustSettings.
-    if (certifierCache[certifier] == null) {
-      const found = trustSettings.trustedCertifiers.find(x => x.identityKey === certifier)
-      if (found == null) return // Skip this certificate if its certifier is not trusted.
-      certifierCache[certifier] = found
-    }
+    const trustedCertifier = certifierCache.get(certifier)
+    if (trustedCertifier == null) return
 
     // Create the IdentityCertifier object that we want to attach.
     const certifierInfo: IdentityCertifier = {
-      name: certifierCache[certifier].name,
-      iconUrl: certifierCache[certifier].iconUrl ?? '',
-      description: certifierCache[certifier].description,
-      trust: certifierCache[certifier].trust
+      name: trustedCertifier.name,
+      iconUrl: trustedCertifier.iconUrl ?? 'https://bsvblockchain.org/favicon.ico',
+      description: trustedCertifier.description,
+      trust: trustedCertifier.trust
     }
 
     // Create an extended certificate that includes certifierInfo.
-    // Note: We use object spread to copy over all properties from the original certificate.
     const extendedCert: IdentityCertificate = {
-      ...cert,
+      type: cert.type,
+      serialNumber: cert.serialNumber,
+      subject: cert.subject,
+      certifier: cert.certifier,
+      revocationOutpoint: cert.revocationOutpoint,
       signature: cert.signature as string, // We know it exists at this point
-      decryptedFields: cert.decryptedFields as Record<string, string>,
-      publiclyRevealedKeyring: cert.keyring,
+      fields: { ...cert.fields },
+      decryptedFields: { ...cert.decryptedFields } as Record<string, string>,
+      publiclyRevealedKeyring: { ...cert.keyring },
       certifierInfo
     }
 
     // Group certificates by subject.
-    identityGroups[subject] ??= { totalTrust: 0, members: [] }
-    identityGroups[subject].totalTrust += certifierInfo.trust
-    identityGroups[subject].members.push(extendedCert)
+    let group = identityGroups.get(subject)
+    if (group == null) {
+      group = { totalTrust: 0, members: [], certifiers: new Set(), certificates: new Set() }
+      identityGroups.set(subject, group)
+    }
+    const certificateID = `${cert.type}\0${cert.serialNumber}\0${certifier}`
+    if (group.certificates.has(certificateID)) return
+    group.certificates.add(certificateID)
+    if (!group.certifiers.has(certifier)) {
+      group.certifiers.add(certifier)
+      group.totalTrust += certifierInfo.trust
+    }
+    group.members.push(extendedCert)
   })
 
   // Filter out groups that do not meet the trust threshold and flatten the results.
   const finalResults: ExtendedVerifiableCertificate[] = []
-  Object.values(identityGroups).forEach(group => {
-    if (group.totalTrust >= trustSettings.trustLevel) {
+  identityGroups.forEach(group => {
+    if (group.totalTrust >= validatedTrust.trustLevel) {
       finalResults.push(...group.members)
     }
   })
@@ -217,30 +354,54 @@ const decodeIdentityOutput = async (
 ): Promise<VerifiableCertificate | null> => {
   try {
     const decodedOutput = PushDrop.decode(verifiedOutput.lockingScript)
-    const certificate: VerifiableCertificate = JSON.parse(Utils.toUTF8(decodedOutput.fields[0]))
-    const verifiableCert = new VerifiableCertificate(
-      certificate.type,
-      certificate.serialNumber,
-      certificate.subject,
-      certificate.certifier,
-      certificate.revocationOutpoint,
-      certificate.fields,
-      certificate.keyring,
-      certificate.signature
+    if (decodedOutput.fields.length !== 2) return null
+    const certificateBytes = boundedBytes(
+      decodedOutput.fields[0],
+      'Identity certificate',
+      1,
+      MAX_IDENTITY_CERTIFICATE_BYTES
     )
-    // IdentityClient.publiclyRevealAttributes and tm_identity use the subject's
-    // BRC-42 identity key to sign the certificate/keyring fields in this output.
+    const fieldSignature = boundedBytes(decodedOutput.fields[1], 'Identity field signature', 8, 80)
+    const chunks = verifiedOutput.lockingScript.chunks
+    if (
+      chunks.length !== 5 ||
+      chunks[0].op !== 33 ||
+      chunks[0].data?.length !== 33 ||
+      chunks[1].op !== 0xac ||
+      chunks[2].op !== pushOpcode(certificateBytes) ||
+      chunks[3].op !== pushOpcode(fieldSignature) ||
+      chunks[4].op !== 0x6d
+    ) {
+      return null
+    }
+    const certificate = certificateRecord(certificateBytes)
+    const subject = ownData(certificate, 'subject')
+    if (typeof subject !== 'string') return null
     const anyoneWallet = new ProtoWallet('anyone')
-    const signature = decodedOutput.fields.pop()
-    if (decodedOutput.fields.length === 0 || signature == null) return null
+    const { publicKey: expectedLockingKey } = await anyoneWallet.getPublicKey({
+      protocolID: IDENTITY_PROTOCOL,
+      keyID: IDENTITY_KEY_ID,
+      counterparty: subject
+    })
+    if (decodedOutput.lockingPublicKey.toString() !== expectedLockingKey) return null
     const { valid } = await anyoneWallet.verifySignature({
-      data: decodedOutput.fields.flat(),
-      signature,
-      counterparty: verifiableCert.subject,
-      protocolID: [1, 'identity'],
-      keyID: '1'
+      data: certificateBytes,
+      signature: fieldSignature,
+      counterparty: subject,
+      protocolID: IDENTITY_PROTOCOL,
+      keyID: IDENTITY_KEY_ID
     })
     if (valid !== true) return null
+    const verifiableCert = new VerifiableCertificate(
+      ownData(certificate, 'type') as string,
+      ownData(certificate, 'serialNumber') as string,
+      subject,
+      ownData(certificate, 'certifier') as string,
+      ownData(certificate, 'revocationOutpoint') as string,
+      ownData(certificate, 'fields') as Record<string, string>,
+      ownData(certificate, 'keyring') as Record<string, string>,
+      ownData(certificate, 'signature') as string
+    )
     if ((await verifiableCert.verify()) !== true) return null
     const decryptedFields = await verifiableCert.decryptFields(anyoneWallet)
     if (Object.keys(decryptedFields).length === 0) return null

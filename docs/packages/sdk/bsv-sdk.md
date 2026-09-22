@@ -3,10 +3,10 @@ id: bsv-sdk
 title: '@bsv/sdk'
 kind: package
 domain: sdk
-version: '2.7.1'
+version: '2.8.0'
 npm: '@bsv/sdk'
-last_updated: '2026-09-16'
-last_verified: '2026-09-16'
+last_updated: '2026-09-21'
+last_verified: '2026-09-21'
 review_cadence_days: 30
 status: stable
 tags: ['sdk', 'crypto', 'transactions']
@@ -21,6 +21,13 @@ calculation, extraction, combination and trimming use the same exact numeric
 domain; malformed non-integer and unsafe offsets fail explicitly. No consumer
 migration is needed for this correction.
 
+It also adds `TOTP.generateSecure()` and `TOTP.validateSecure()` for new
+authentication flows. These methods default to conventional six-character,
+zero-padded codes. The existing `TOTP.generate()` and `TOTP.validate()` methods
+retain their published two-digit, unpadded default so existing wire protocols
+do not change; applications should preserve secure codes as strings and apply
+an independent attempt limit.
+
 The foundational cryptographic and transaction library for the BSV blockchain. Zero external dependencies — all cryptographic primitives have been validated by a third-party auditor. Every other library in the ts-stack builds on top of `@bsv/sdk`. <!-- audio: ts-stack.m4a @ 27:00 -->
 
 Provides low-level primitives (keys, signatures, hashing), script construction and execution, transaction creation and signing, and integration interfaces for wallets and overlay networks.
@@ -34,6 +41,13 @@ Authenticated general messages, certificate requests, and certificate
 responses are bound to the identity in the nonce-selected peer session.
 Transport identity metadata must match that session, and callbacks receive
 only the identity used for signature verification.
+
+Completed `createAction` and `signAction` transaction results must evidence
+the value of every direct input. A completed `createAction` may rely on the
+caller's immutable `inputBEEF`; otherwise the returned BEEF must include each
+direct source transaction. Deferred `signableTransaction` results may remain
+partial for compatibility, but the final result must be complete. Duplicate
+input outpoints and zero-input transactions that create value fail validation.
 
 ## Install
 
@@ -91,7 +105,8 @@ const broadcast = await tx.broadcast()
 - **Auth & identity** — `Certificate`, `IdentityKey`, `AuthModule` for peer authentication
 - **Storage & KV** — `Storage` interface with `LocalStorageAdapter`, `InMemoryStorage`; `KVStore` for distributed data
 - **Overlay integration** — `TopicBroadcaster`, `TopicListener`, `RemittanceProtocol`, `IdentityResolver`, `Registry`
-- **2FA** — `generateTOTP()`, `verifyTOTP()` for time-based one-time passwords
+- **2FA** — `TOTP.generateSecure()` and `TOTP.validateSecure()` for new flows;
+  compatibility methods remain available for existing protocols
 
 ## AuthFetch payment ancestry
 
@@ -106,6 +121,13 @@ invalid-only header preserves existing payment behavior, so existing consumers
 require no migration. Browser services must expose the optional response header
 through their existing CORS policy to enable this optimization.
 The header is an optional SDK extension, not a standardized BRC-105 header.
+
+Authenticated HTTP response bodies use a bounded streaming buffer before
+signed-message decoding: 16 MiB for application responses and 1 MiB for auth
+handshakes by default. `SimplifiedFetchTransportOptions` exposes
+`maxResponseBytes` and `maxHandshakeResponseBytes` for explicit deployment
+limits. Malformed response frames with excessive headers or lengths,
+truncation, or trailing bytes are rejected.
 
 ## Common patterns
 
@@ -285,6 +307,12 @@ const output = { lockingScript: lockingScript.toHex(), satoshis: 1 }
 
 > **UTXO reuse across parallel transactions** — If two transactions reference the same UTXO, only one will confirm. Wallet implementations must track pending outputs.
 
+> **AuthFetch payment authority** — Automatic BRC-105 payment creation delegates
+> spending authorization to the configured wallet's `createAction` policy. Use
+> a wallet that requires the intended user or policy approval. Diagnostics omit
+> URL credentials/path/query, sensitive header values, transaction bytes, and
+> derivation material.
+
 > **Script evaluation order** — Unlocking script is evaluated first, then locking script. Stack must be left with true atop for success.
 
 > **Broadcast endpoint differences** — ARC, WhatsOnChain, Teranode have different response formats and rate limits. Implement retry logic and fallback chains.
@@ -304,11 +332,22 @@ const output = { lockingScript: lockingScript.toHex(), satoshis: 1 }
 ## Certificate policy and observer callbacks
 
 SDK 2.7 records the locally requested certificate policy for each BRC-103
-session. Standalone responses must match one complete outstanding dynamic
-request or the session's handshake policy. Policies are copied before sending,
-so a later edit of the caller's object does not change validation. Responses
-never select their own validation policy. A different dynamic request cannot
-satisfy an unmet handshake requirement.
+session. Standalone responses must fit one complete locally recorded dynamic
+request allowlist or the session's handshake allowlist. Policies are copied
+before sending, so a later edit of the caller's object does not change
+validation. Responses never select their own validation policy. A different
+dynamic request cannot satisfy an unmet handshake requirement.
+
+The legacy v0.1 `RequestedCertificateSet` has no all-of, any-of, threshold, or
+optional-field expression. Compatibility validation therefore proves only that
+each supplied certificate and each non-empty disclosed-field subset is allowed
+by one locally recorded set. It does **not** prove that every listed certificate
+type or every requested field was supplied. Each party chooses what to request,
+what to provide, and how much to disclose. Before granting access, inspect the
+actual certificate types, certifiers, and decrypted fields and enforce the
+application's complete authorization policy. Terminate or constrain the
+session or operation when the disclosures are insufficient; protocol-level
+authentication never declares the claims sufficient for the application.
 
 The v0.1 AuthMessage fields, signatures and encodings are unchanged. Because a
 certificateResponse does not echo the request nonce, concurrent responses are
@@ -317,11 +356,25 @@ successful dynamic response consumes one matching request; failed validation
 keeps it available for retry. Request the intended set explicitly instead of
 relying on unrequested certificates.
 
+An `initialRequest` is unsigned, and the v0.1 `initialResponse` signature binds
+the nonce pair and identity but not its `requestedCertificates` or
+`certificates` members. Built-in wallet proving encrypts revealed field keys to
+the requested identity, but a certificate-request callback can observe only a
+claimed identity during the initial exchange. Do not disclose plaintext or
+authorize side effects from that callback. Because the requested set is
+mutable, make every decision from the certificates and fields actually
+disclosed and validated, never from the request alone. Prefer wallet-backed
+proof creation, and use a signed post-authentication certificate request or an
+application-layer integrity check when request integrity itself matters.
+
 `listenForCertificatesReceived` is an observer. The SDK commits certificate
 validation and releases its waiters before invoking listeners. A throwing or
 rejecting listener stops later listeners and rejects message handling, but does
-not roll back validation. Apply the requested certificate policy and explicit
-application authorization before performing protected work.
+not roll back validation. The callback's third argument is the local session
+nonce and its optional fourth argument is the peer nonce, allowing adapters to
+bind application approval to the exact validated exchange; existing two-argument
+callbacks remain compatible. Apply the requested certificate policy and
+explicit application authorization before performing protected work.
 
 Custom `AsyncSessionManager` implementations must retain the complete
 `PeerSession`, including the optional local `certificatePolicy` and
@@ -329,3 +382,9 @@ Custom `AsyncSessionManager` implementations must retain the complete
 Peer serializes its own certificate read-modify-write operations; shared stores
 must also coordinate writers across instances. Older stored sessions without
 these fields use the configured handshake policy.
+
+The in-process session store evicts only unauthenticated sessions at capacity.
+If every slot is authenticated, new handshakes fail until a session expires or
+is removed. Only a successful locally initiated handshake can select the
+implicit destination for a later `Peer` call; inbound messages cannot retarget
+it.

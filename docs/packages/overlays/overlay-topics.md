@@ -4,7 +4,7 @@ title: '@bsv/overlay-topics'
 kind: package
 domain: overlays
 npm: '@bsv/overlay-topics'
-version: '1.8.3'
+version: '1.8.4'
 last_updated: '2026-09-18'
 last_verified: '2026-09-18'
 review_cadence_days: 30
@@ -155,7 +155,9 @@ const admittance = await manager.identifyAdmissibleOutputs(beef, [])
 
 ## Spec conformance
 
-- **DID** — W3C-compliant decentralized identifiers (serialNumber as DID identifier)
+- **DID** — Legacy serial-number token indexing. The v1 wire token omits issuer
+  and subject, so lookup does not establish either identity relationship;
+  consumers need a separate authenticated binding.
 - **BTMS** — Basic Token Management System protocol (issuance, transfer, burn)
 - **KVStore** — Key-value protocol-agnostic storage
 - **ProtoMap** — Registry of wallet protocols with deserialization support

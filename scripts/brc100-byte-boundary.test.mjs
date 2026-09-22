@@ -26,7 +26,8 @@ const walletBoundaryFiles = [
   'packages/wallet/wallet-toolbox/src/sdk/WERR_errors.ts'
 ]
 
-const byteSafeHelper = /(?:normalizeBRC100|toBRC100Portable|stringifyBRC100)/
+const byteSafeHelper =
+  /(?:encodeAuthSocketEventPayload|normalizeBRC100|toBRC100Portable|stringifyBRC100)/
 
 for (const file of walletBoundaryFiles) {
   test(`${file} keeps BRC-100 bytes out of raw JSON boundaries`, async () => {

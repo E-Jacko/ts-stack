@@ -379,6 +379,29 @@ describe('AirGapDecoder', () => {
     expect(Array.from(dec.message()!)).toEqual(Array.from(message(k)))
   })
 
+  it('rejects a single over-budget mix before materializing its index set', () => {
+    const dec = new AirGapDecoder()
+    const k = 0xffff
+    const seq = 67_433
+    const payload = Uint8Array.of(1)
+    expect(blocksForPart(seq, k).length).toBe(4241)
+
+    expect(dec.accept(craftPart({ seq, k, msgLen: k, crc: 0 }, payload))).toEqual({
+      ok: false,
+      done: false,
+      have: 0,
+      total: k
+    })
+    // The high-degree rejection does not poison the session: the systematic
+    // path remains available and grows solved state only as progress arrives.
+    expect(dec.accept(craftPart({ seq: 0, k, msgLen: k, crc: 0 }, payload))).toEqual({
+      ok: true,
+      done: false,
+      have: 1,
+      total: k
+    })
+  })
+
   it('caps duplicate tracking and keeps the session live past the cap', () => {
     // K = 2 at one byte per block. Feed only fountain parts that resolve to
     // block 0 — pure redundancy once block 0 is solved — so the seen-set

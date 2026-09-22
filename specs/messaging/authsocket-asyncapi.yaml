@@ -23,7 +23,9 @@ info:
 
     Once the handshake succeeds the peer's `identityKey` (compressed secp256k1
     public key, 66-char hex) is known server-side and stored in memory for the
-    lifetime of the connection.
+    lifetime of the connection. Every concurrently received first-session event
+    waits for the same application activation callback; the peer is not eligible
+    for application dispatch or server routing until activation succeeds.
 
     ## Application events
 
@@ -101,7 +103,10 @@ components:
           type: array
           items:
             type: integer
-          description: DER-encoded ECDSA signature over the payload.
+          description: |
+            Message-specific DER signature. `initialRequest` is unsigned;
+            `initialResponse` signs the nonce pair; general and certificate
+            messages sign their protocol-defined preimages.
         requestedCertificates:
           type: object
           description: Optional certificate request set (BRC-52 format).
@@ -113,13 +118,16 @@ components:
         Application-level wrapper JSON-encoded inside the BRC-103 `general`
         message payload. The `SocketServerTransport` encodes/decodes this
         transparently; application code only sees `eventName` and `data`.
-      required: [eventName, data]
+      required: [eventName]
       properties:
         eventName:
           type: string
           description: The Socket.IO event name.
         data:
-          description: The event-specific payload.
+          description: |
+            Optional event-specific supported JSON. Non-JSON values, negative
+            zero, accessors, hidden/extra properties, sparse arrays, and
+            serialization hooks are rejected before outbound signing.
 
     # ----- Authentication flow -----
     AuthenticatePayload:

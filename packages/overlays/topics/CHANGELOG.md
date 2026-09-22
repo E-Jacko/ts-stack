@@ -57,6 +57,11 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Security
 
+- Reject non-canonical or unsafe BTMS amount fields in topic admission and
+  lookup indexing, and fail closed if a per-asset aggregate leaves JavaScript's
+  exact-integer range. Valid canonical amounts and topic identifiers are
+  unchanged.
+
 - Version 1.8.0 requires admitted per-asset admin history for every non-genesis
   Mandala action. The reference storage manager provides the verifier; custom
   adapters must implement it. Registration uses its own genesis outpoint.
@@ -65,9 +70,14 @@ All notable changes to this project will be documented in this file. The format 
   and source key. Sender blinding remains supported.
 - Reject duplicate or invalid linkage indices and normalize sanctions key
   casing. Valid wire fields and encodings are unchanged.
+- Canonicalize Mandala administrative identities and outpoints and compare
+  historical policy state case-insensitively, preventing case variants from
+  bypassing identity blocks, output freezes, or eviction records.
+- Make Mandala lookup balance accounting idempotent across repeated admission,
+  spend, and eviction callbacks, and reject conflicting token metadata for an
+  outpoint that is already indexed.
 - Back up and audit historical admin and ownership records before replay, and
   coordinate admission and lookup upgrades. See the README migration guide.
-
 
 ## [1.6.0] - 2026-07-10
 

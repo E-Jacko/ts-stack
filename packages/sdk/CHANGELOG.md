@@ -214,13 +214,47 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
-### 2.7.1 candidate — authenticated peer identity binding
+### 2.8.0 candidate — authenticated boundaries and additive secure TOTP APIs
+
+- Add `TOTP.generateSecure()` and `TOTP.validateSecure()` for conventional
+  six-digit, zero-padded codes while retaining the published two-digit,
+  unpadded `generate()` and `validate()` behavior for wire compatibility.
 
 - Bind authenticated general messages, certificate requests, and certificate
   responses to the identity stored in the nonce-selected session. Reject
   mismatched transport identity metadata and dispatch only the identity used
   for signature verification. The BRC-103 v0.1 wire envelope, nonce derivation,
   payload bytes, and signature format are unchanged.
+- Own and bound every BRC-103 message, policy, certificate, proof, and byte
+  collection before asynchronous wallet work. Reject inherited/accessor data,
+  malformed public keys/outpoints/base64/DER, excessive frames, unrequested
+  proof fields, and certificate mutation during signing. New master keyrings
+  encode 32-byte keys while preserving decryption of legacy minimal encodings.
+- Prevent inbound traffic from retargeting `Peer`'s implicit outbound
+  destination, preserve authenticated sessions during capacity pressure, cap
+  AuthFetch's received-certificate buffer, and parse payment amounts as exact
+  positive safe integers.
+- Bound SimplifiedFetch request/response framing and signed-header work. Redact
+  URL credentials/path/query, sensitive header values, transaction bytes, and
+  payment derivation data from AuthFetch diagnostics; the wallet remains the
+  BRC-105 spending-authorization boundary.
+- Require every completed `createAction` and `signAction` transaction to carry
+  direct source-value evidence, either in its returned BEEF or in the immutable
+  `createAction.inputBEEF` request. Reject duplicate input outpoints and
+  zero-input value creation. Deferred `signableTransaction` results retain
+  historical partial-BEEF compatibility. Completed `signAction` results, and
+  `createAction` results without matching request evidence, must include the
+  direct source transactions in their returned BEEF.
+- Restore explicit byte-wise initial-response nonce concatenation so verifier
+  behavior remains correct if nonce base64 framing changes in the future.
+- Document two v0.1 compatibility limits: initial certificate members are not
+  covered by the nonce-pair signature, and `RequestedCertificateSet` is an
+  allowlist rather than a complete type/field-fulfillment assertion. Use signed
+  post-handshake requests and explicit application authorization where needed.
+- Clarify the intended Contacts trust model throughout the identity API and
+  guides: a saved identity-key association is authoritative local policy based
+  on the user's independent validation, like an accepted self-signed
+  certificate, but is neither transferable nor third-party certification.
 
 ### 2.7.0 candidate — authentication policy and settlement acceptance
 
