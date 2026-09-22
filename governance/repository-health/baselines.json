@@ -261,7 +261,7 @@
   "sonar": {
     "unresolved": 1529,
     "codeSmells": 1494,
-    "bugs": 26,
+    "bugs": 0,
     "vulnerabilities": 9,
     "blocker": 140,
     "critical": 191,
@@ -273,12 +273,12 @@
     "duplicatedLines": 10874,
     "duplicationDensityPercent": 2,
     "ncloc": 349151,
-    "reliabilityRating": "D",
+    "reliabilityRating": "A",
     "securityRating": "C",
     "maintainabilityRating": "A",
     "debtMinutes": 13544,
     "mainCoverageAvailable": false,
-    "source": "https://sonarcloud.io/project/issues?issueStatuses=OPEN%2CCONFIRMED&sinceLeakPeriod=true&id=bsv-blockchain_ts-stack"
+    "source": "https://sonarcloud.io/component_measures?metric=reliability_rating&id=bsv-blockchain_ts-stack"
   },
   "governance": {
     "requiredApprovals": 1,
