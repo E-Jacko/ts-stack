@@ -654,9 +654,7 @@ describe('SimplifiedFetchTransport deserializeRequestPayload', () => {
       writer.write(encodedValue)
     }
     writer.writeVarIntNum(-1)
-    expect(() => transport.deserializeRequestPayload(writer.toArray())).toThrow(
-      'duplicate header'
-    )
+    expect(() => transport.deserializeRequestPayload(writer.toArray())).toThrow('duplicate header')
   })
 })
 
@@ -955,61 +953,48 @@ describe('SimplifiedFetchTransport callback containment', () => {
   })
 })
 
-describe('writeGeneralResponsePayload — BRC-104 body-length encoding', () => {
-  // BRC-104 §6.7.3: "If the body is empty, specify a length of -1 in the
-  // payload"; §6.9 lists the response preimage's final field as "Body length
-  // + body bytes (or -1 if none)". The request side (AuthFetch's
-  // writeRequestBody / writeOptionalText) already encodes -1; these pin the
-  // response side to the same rule. Asserting the exact value is the
-  // regression guard: under the pre-fix encoding the terminal varint read 0,
-  // so either test going green with that encoding is impossible.
-  const makeTransport = (): any =>
-    new SimplifiedFetchTransport('https://api.example.com', jest.fn() as any)
-
-  test('an empty body encodes as -1 with no trailing bytes', () => {
-    const response = new Response(null, { status: 404 })
-    const payload: number[] = (makeTransport() as any).writeGeneralResponsePayload(
-      response,
-      []
-    )
-    const reader = new Utils.Reader(payload)
-    expect(reader.readVarIntNum()).toBe(404) // status
-    expect(reader.readVarIntNum()).toBe(0) // no signed headers
-    expect(reader.readVarIntNum()).toBe(-1) // empty body is -1, not 0
-    expect(reader.pos).toBe(payload.length) // and nothing follows it
-  })
-
-  test('an empty body is still -1 when a request id precedes it', () => {
-    const requestIdBytes = Array.from({ length: 32 }, (_, i) => i)
-    const requestId = Utils.toBase64(requestIdBytes)
-    const response = new Response(null, {
-      status: 404,
-      headers: { 'x-bsv-auth-request-id': requestId }
+describe('BRC-104 response body-length wire encoding', () => {
+  async function receive(response: Response): Promise<number[]> {
+    const transport = new SimplifiedFetchTransport('https://api.example.com', async () => response)
+    const received: AuthMessage[] = []
+    await transport.onData(async message => {
+      received.push(message)
     })
-    const payload: number[] = (makeTransport() as any).writeGeneralResponsePayload(
-      response,
-      []
-    )
-    const reader = new Utils.Reader(payload)
-    expect(reader.read(32)).toEqual(requestIdBytes)
-    expect(reader.readVarIntNum()).toBe(404)
-    expect(reader.readVarIntNum()).toBe(0)
-    expect(reader.readVarIntNum()).toBe(-1)
-    expect(reader.pos).toBe(payload.length)
+    await transport.send(makeGeneralMessage())
+    expect(received).toHaveLength(1)
+    return received[0].payload!
+  }
+
+  function response(status: number, body: number[] = [], requestId?: string): Response {
+    return new Response(body.length > 0 ? new Uint8Array(body) : null, {
+      status,
+      headers: {
+        'x-bsv-auth-version': '0.1',
+        'x-bsv-auth-identity-key': 'server-key',
+        'x-bsv-auth-signature': 'aabbcc',
+        ...(requestId === undefined ? {} : { 'x-bsv-auth-request-id': requestId })
+      }
+    })
+  }
+
+  // Independent CompactSize byte vectors for BRC-104 sections 6.7.3 and 6.9.
+  // Exercise the public HTTP receive path, including its body reader and headers.
+  test.each([
+    [204, [0xcc]],
+    [401, [0xfd, 0x91, 0x01]],
+    [403, [0xfd, 0x93, 0x01]],
+    [404, [0xfd, 0x94, 0x01]]
+  ])('bodyless HTTP %i encodes -1 with no trailing bytes', async (status, statusBytes) => {
+    const expected = [...statusBytes, 0, ...Array<number>(9).fill(0xff)]
+    expect(await receive(response(status))).toEqual(expected)
+    const requestIdBytes = Array.from({ length: 32 }, (_, i) => i)
+    expect(await receive(response(status, [], Utils.toBase64(requestIdBytes)))).toEqual([
+      ...requestIdBytes,
+      ...expected
+    ])
   })
 
-  test('a non-empty body still encodes its true length and bytes', () => {
-    const body = [1, 2, 3]
-    const response = new Response(null, { status: 404 })
-    const payload: number[] = (makeTransport() as any).writeGeneralResponsePayload(
-      response,
-      body
-    )
-    const reader = new Utils.Reader(payload)
-    expect(reader.readVarIntNum()).toBe(404)
-    expect(reader.readVarIntNum()).toBe(0)
-    expect(reader.readVarIntNum()).toBe(3)
-    expect(reader.read(3)).toEqual(body)
-    expect(reader.pos).toBe(payload.length)
+  test('a non-empty body retains its true length and exact bytes', async () => {
+    expect(await receive(response(404, [1, 2, 3]))).toEqual([0xfd, 0x94, 0x01, 0, 3, 1, 2, 3])
   })
 })

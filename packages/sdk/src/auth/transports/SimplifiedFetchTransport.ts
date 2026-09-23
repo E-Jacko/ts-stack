@@ -310,11 +310,8 @@ export class SimplifiedFetchTransport implements Transport {
       writer.writeVarIntNum(valueBytes.length)
       writer.write(valueBytes)
     }
-    // BRC-104 §6.7.3/§6.9: an absent or empty body is encoded as -1, not as a
-    // zero length — the rule AuthFetch's writeRequestBody and
-    // writeOptionalText already apply to ABSENT values on the request side.
-    // Encoding 0 here made every signed bodyless response (a bare 404, 204
-    // or empty 401/403) fail verification against a conforming counterparty.
+    // BRC-104 sections 6.7.3 and 6.9 use -1 for absent or empty response
+    // bodies. Zero would not reproduce a conforming server's signed preimage.
     if (body.length === 0) {
       writer.writeVarIntNum(-1)
     } else {
