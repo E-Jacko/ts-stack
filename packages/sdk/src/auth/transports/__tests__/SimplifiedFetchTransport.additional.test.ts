@@ -954,3 +954,62 @@ describe('SimplifiedFetchTransport callback containment', () => {
     )
   })
 })
+
+describe('writeGeneralResponsePayload — BRC-104 body-length encoding', () => {
+  // BRC-104 §6.7.3: "If the body is empty, specify a length of -1 in the
+  // payload"; §6.9 lists the response preimage's final field as "Body length
+  // + body bytes (or -1 if none)". The request side (AuthFetch's
+  // writeRequestBody / writeOptionalText) already encodes -1; these pin the
+  // response side to the same rule. Asserting the exact value is the
+  // regression guard: under the pre-fix encoding the terminal varint read 0,
+  // so either test going green with that encoding is impossible.
+  const makeTransport = (): any =>
+    new SimplifiedFetchTransport('https://api.example.com', jest.fn() as any)
+
+  test('an empty body encodes as -1 with no trailing bytes', () => {
+    const response = new Response(null, { status: 404 })
+    const payload: number[] = (makeTransport() as any).writeGeneralResponsePayload(
+      response,
+      []
+    )
+    const reader = new Utils.Reader(payload)
+    expect(reader.readVarIntNum()).toBe(404) // status
+    expect(reader.readVarIntNum()).toBe(0) // no signed headers
+    expect(reader.readVarIntNum()).toBe(-1) // empty body is -1, not 0
+    expect(reader.pos).toBe(payload.length) // and nothing follows it
+  })
+
+  test('an empty body is still -1 when a request id precedes it', () => {
+    const requestIdBytes = Array.from({ length: 32 }, (_, i) => i)
+    const requestId = Utils.toBase64(requestIdBytes)
+    const response = new Response(null, {
+      status: 404,
+      headers: { 'x-bsv-auth-request-id': requestId }
+    })
+    const payload: number[] = (makeTransport() as any).writeGeneralResponsePayload(
+      response,
+      []
+    )
+    const reader = new Utils.Reader(payload)
+    expect(reader.read(32)).toEqual(requestIdBytes)
+    expect(reader.readVarIntNum()).toBe(404)
+    expect(reader.readVarIntNum()).toBe(0)
+    expect(reader.readVarIntNum()).toBe(-1)
+    expect(reader.pos).toBe(payload.length)
+  })
+
+  test('a non-empty body still encodes its true length and bytes', () => {
+    const body = [1, 2, 3]
+    const response = new Response(null, { status: 404 })
+    const payload: number[] = (makeTransport() as any).writeGeneralResponsePayload(
+      response,
+      body
+    )
+    const reader = new Utils.Reader(payload)
+    expect(reader.readVarIntNum()).toBe(404)
+    expect(reader.readVarIntNum()).toBe(0)
+    expect(reader.readVarIntNum()).toBe(3)
+    expect(reader.read(3)).toEqual(body)
+    expect(reader.pos).toBe(payload.length)
+  })
+})
